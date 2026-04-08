@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check backend/utils/vapiContext.js)",
+      "Bash(node --check backend/controllers/callController.js)",
+      "Bash(node --check backend/routes/call.js)",
+      "Bash(node --check server.js)"
+    ]
+  }
+}

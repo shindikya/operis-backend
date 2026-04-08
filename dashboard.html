@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Test Barbershop — Dashboard</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      --green-dark:  #0F2318;
+      --green-deep:  #1B3A2A;
+      --green-card:  #1F3D2C;
+      --green-hover: #274D37;
+      --gold:        #D4A843;
+      --gold-light:  #E8C547;
+      --gold-dim:    #A07B2A;
+      --cream:       #F5F0E8;
+      --cream-dim:   #B8B0A0;
+      --red-soft:    #C0392B;
+      --radius:      12px;
+      --shadow:      0 2px 12px rgba(0,0,0,0.35);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--green-dark);
+      color: var(--cream);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: var(--green-deep);
+      border-bottom: 2px solid var(--gold-dim);
+      padding: 20px 16px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .shop-name {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: 0.3px;
+    }
+
+    .header-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--gold);
+      background: rgba(212,168,67,0.15);
+      border: 1px solid var(--gold-dim);
+      border-radius: 20px;
+      padding: 3px 10px;
+      white-space: nowrap;
+    }
+
+    .header-sub {
+      font-size: 12px;
+      color: var(--cream-dim);
+      margin-top: 3px;
+    }
+
+    /* ── Stats strip ── */
+    .stats {
+      display: flex;
+      gap: 10px;
+      padding: 14px 16px;
+      background: var(--green-dark);
+      border-bottom: 1px solid rgba(212,168,67,0.12);
+    }
+
+    .stat-pill {
+      flex: 1;
+      background: var(--green-card);
+      border: 1px solid rgba(212,168,67,0.25);
+      border-radius: 10px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--gold);
+      display: block;
+      line-height: 1.1;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--cream-dim);
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* ── Section heading ── */
+    .section-title {
+      padding: 16px 16px 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--gold-dim);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    /* ── Booking cards ── */
+    .cards {
+      padding: 0 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card {
+      background: var(--green-card);
+      border: 1px solid rgba(212,168,67,0.18);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--gold);
+      border-radius: var(--radius) 0 0 var(--radius);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .card-datetime {
+      flex: 1;
+    }
+
+    .card-date {
+      font-size: 13px;
+      color: var(--cream-dim);
+      font-weight: 500;
+    }
+
+    .card-time {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--cream);
+      line-height: 1.2;
+    }
+
+    .status-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+
+    .status-confirmed {
+      background: rgba(46,160,67,0.2);
+      color: #5fcf7a;
+      border: 1px solid rgba(46,160,67,0.35);
+    }
+
+    .status-cancelled {
+      background: rgba(192,57,43,0.2);
+      color: #e07b6e;
+      border: 1px solid rgba(192,57,43,0.35);
+    }
+
+    .status-completed {
+      background: rgba(212,168,67,0.15);
+      color: var(--gold);
+      border: 1px solid rgba(212,168,67,0.3);
+    }
+
+    .card-divider {
+      height: 1px;
+      background: rgba(212,168,67,0.1);
+      margin: 10px 0;
+    }
+
+    .card-details {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .card-detail {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .detail-icon {
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .detail-text {
+      font-size: 14px;
+      color: var(--cream);
+    }
+
+    .detail-text a {
+      color: var(--gold-light);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .detail-text a:active {
+      color: var(--gold);
+    }
+
+    .service-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--cream);
+    }
+
+    .service-sub {
+      font-size: 12px;
+      color: var(--cream-dim);
+    }
+
+    /* ── Today marker ── */
+    .today-marker {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      margin-bottom: 4px;
+    }
+
+    .today-marker-line {
+      flex: 1;
+      height: 1px;
+      background: rgba(212,168,67,0.25);
+    }
+
+    .today-marker-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--gold-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 60px 32px 40px;
+    }
+
+    .empty-icon {
+      font-size: 48px;
+      display: block;
+      margin-bottom: 16px;
+    }
+
+    .empty-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--cream);
+      margin-bottom: 6px;
+    }
+
+    .empty-sub {
+      font-size: 13px;
+      color: var(--cream-dim);
+    }
+
+    /* ── Loading state ── */
+    .loading-state {
+      text-align: center;
+      padding: 60px 32px;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(212,168,67,0.2);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      font-size: 14px;
+      color: var(--cream-dim);
+    }
+
+    /* ── Error state ── */
+    .error-state {
+      margin: 16px;
+      background: rgba(192,57,43,0.15);
+      border: 1px solid rgba(192,57,43,0.35);
+      border-radius: var(--radius);
+      padding: 16px;
+      text-align: center;
+    }
+
+    .error-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #e07b6e;
+      margin-bottom: 4px;
+    }
+
+    .error-sub {
+      font-size: 12px;
+      color: var(--cream-dim);
+    }
+
+    /* ── Refresh button ── */
+    .refresh-wrap {
+      padding: 8px 16px 32px;
+    }
+
+    .refresh-btn {
+      width: 100%;
+      padding: 14px;
+      background: transparent;
+      border: 1.5px solid var(--gold-dim);
+      border-radius: var(--radius);
+      color: var(--gold);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .refresh-btn:active {
+      background: rgba(212,168,67,0.12);
+      border-color: var(--gold);
+    }
+
+    /* ── Last updated ── */
+    .last-updated {
+      text-align: center;
+      font-size: 11px;
+      color: var(--cream-dim);
+      padding: 0 16px 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <span class="shop-name">Test Barbershop</span>
+      <span class="header-badge">OPERIS</span>
+    </div>
+    <div class="header-sub">ระบบนัดหมาย &nbsp;·&nbsp; Booking Dashboard</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-pill">
+      <span class="stat-value" id="stat-today">–</span>
+      <span class="stat-label">วันนี้ / Today</span>
+    </div>
+    <div class="stat-pill">
+      <span class="stat-value" id="stat-upcoming">–</span>
+      <span class="stat-label">รอมาถึง / Upcoming</span>
+    </div>
+    <div class="stat-pill">
+      <span class="stat-value" id="stat-week">–</span>
+      <span class="stat-label">สัปดาห์นี้ / This Week</span>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div id="content">
+    <div class="loading-state">
+      <div class="spinner"></div>
+      <div class="loading-text">กำลังโหลด…<br>Loading bookings…</div>
+    </div>
+  </div>
+
+  <!-- Supabase JS v2 via CDN -->
+  <!-- NOTE: The anon key below is safe for client-side use.
+       For production, enable Row Level Security (RLS) on the bookings table
+       so unauthenticated reads are scoped to the intended business only. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    const SUPABASE_URL  = 'https://grzghjoughjqyguabaxx.supabase.co';
+    const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdyemdoam91Z2hqcXlndWFiYXh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5Njc5NzEsImV4cCI6MjA5MDU0Mzk3MX0.lIXBtNMhAQBVR-0uctE52ULzFcyegxPnKr3CAIpJLcU';
+    const BUSINESS_ID   = 'ab621411-ce0c-4529-92cb-26ca06cbd16e';
+    const TZ_OFFSET_MS  = 7 * 60 * 60 * 1000; // UTC+7 Bangkok
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    // ── Date helpers (UTC+7, no external libs) ──────────────────────────────
+
+    function toBangkok(utcStr) {
+      return new Date(new Date(utcStr).getTime() + TZ_OFFSET_MS);
+    }
+
+    function startOfTodayUTC() {
+      const now = new Date();
+      const bkk = new Date(now.getTime() + TZ_OFFSET_MS);
+      // midnight Bangkok in UTC
+      const midnightBkk = new Date(Date.UTC(
+        bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate()
+      ));
+      return new Date(midnightBkk.getTime() - TZ_OFFSET_MS);
+    }
+
+    function endOfTodayUTC() {
+      const start = startOfTodayUTC();
+      return new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
+    }
+
+    function endOfWeekUTC() {
+      const start = startOfTodayUTC();
+      return new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+    }
+
+    const THAI_DAYS  = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+    const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
+                         'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const EN_MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun',
+                         'Jul','Aug','Sep','Oct','Nov','Dec'];
+    const EN_DAYS     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    function formatDate(utcStr) {
+      const d = toBangkok(utcStr);
+      const day  = d.getUTCDay();
+      const date = d.getUTCDate();
+      const mon  = d.getUTCMonth();
+      const yr   = d.getUTCFullYear();
+      return `${THAI_DAYS[day]} ${date} ${THAI_MONTHS[mon]} ${yr + 543}  ·  ${EN_DAYS[day]} ${date} ${EN_MONTHS[mon]}`;
+    }
+
+    function formatTime(utcStr) {
+      const d = toBangkok(utcStr);
+      const h = String(d.getUTCHours()).padStart(2, '0');
+      const m = String(d.getUTCMinutes()).padStart(2, '0');
+      return `${h}:${m}`;
+    }
+
+    function isSameDay(utcStr, refDateUTC) {
+      const d   = toBangkok(utcStr);
+      const ref = toBangkok(refDateUTC.toISOString());
+      return d.getUTCFullYear() === ref.getUTCFullYear()
+          && d.getUTCMonth()    === ref.getUTCMonth()
+          && d.getUTCDate()     === ref.getUTCDate();
+    }
+
+    function statusLabel(status) {
+      const map = {
+        confirmed: { th: 'ยืนยัน',    en: 'Confirmed',  cls: 'status-confirmed' },
+        cancelled: { th: 'ยกเลิก',    en: 'Cancelled',  cls: 'status-cancelled' },
+        completed: { th: 'เสร็จสิ้น', en: 'Completed',  cls: 'status-completed' },
+        no_show:   { th: 'ไม่มา',     en: 'No-show',    cls: 'status-cancelled' },
+      };
+      return map[status] || { th: status, en: status, cls: 'status-confirmed' };
+    }
+
+    function formatLastUpdated() {
+      const now = toBangkok(new Date().toISOString());
+      const h = String(now.getUTCHours()).padStart(2,'0');
+      const m = String(now.getUTCMinutes()).padStart(2,'0');
+      return `อัปเดตล่าสุด ${h}:${m} (Bangkok)`;
+    }
+
+    // ── Render ───────────────────────────────────────────────────────────────
+
+    function renderBookings(bookings) {
+      const content   = document.getElementById('content');
+      const todayEnd  = endOfTodayUTC();
+      const weekEnd   = endOfWeekUTC();
+      const nowISO    = new Date().toISOString();
+
+      // Stats
+      const todayCount    = bookings.filter(b => b.start_time <= todayEnd.toISOString()).length;
+      const upcomingCount = bookings.length;
+      const weekCount     = bookings.filter(b => b.start_time <= weekEnd.toISOString()).length;
+
+      document.getElementById('stat-today').textContent    = todayCount;
+      document.getElementById('stat-upcoming').textContent = upcomingCount;
+      document.getElementById('stat-week').textContent     = weekCount;
+
+      if (bookings.length === 0) {
+        content.innerHTML = `
+          <div class="empty-state">
+            <span class="empty-icon">📅</span>
+            <div class="empty-title">ไม่มีนัดหมายที่กำลังมา</div>
+            <div class="empty-sub">No upcoming bookings</div>
+          </div>
+          ${refreshHTML()}
+        `;
+        return;
+      }
+
+      let html = `<div class="section-title">นัดหมายที่กำลังมา &nbsp;/&nbsp; Upcoming Bookings</div>`;
+      html += `<div class="cards">`;
+
+      let shownTodayMarker = false;
+
+      bookings.forEach(b => {
+        const isToday = isSameDay(b.start_time, new Date());
+
+        if (isToday && !shownTodayMarker) {
+          shownTodayMarker = true;
+          html += `
+            <div class="today-marker">
+              <div class="today-marker-line"></div>
+              <span class="today-marker-label">วันนี้ / Today</span>
+              <div class="today-marker-line"></div>
+            </div>`;
+        }
+
+        const startFmt  = formatTime(b.start_time);
+        const endFmt    = b.end_time ? formatTime(b.end_time) : '';
+        const timeRange = endFmt ? `${startFmt} – ${endFmt}` : startFmt;
+        const dateFmt   = formatDate(b.start_time);
+        const svc       = b.services ? b.services.name : 'ไม่ระบุบริการ';
+        const phone     = b.clients  ? b.clients.phone : '–';
+        const clientName = b.clients && b.clients.name ? b.clients.name : 'ลูกค้า';
+        const st        = statusLabel(b.status);
+
+        const phoneDisplay = phone !== '–'
+          ? `<a href="tel:${phone}">${phone}</a>`
+          : '–';
+
+        html += `
+          <div class="card">
+            <div class="card-header">
+              <div class="card-datetime">
+                <div class="card-date">${dateFmt}</div>
+                <div class="card-time">${timeRange}</div>
+              </div>
+              <span class="status-badge ${st.cls}">${st.th} / ${st.en}</span>
+            </div>
+            <div class="card-divider"></div>
+            <div class="card-details">
+              <div class="card-detail" style="flex:1;min-width:120px">
+                <span class="detail-icon">✂️</span>
+                <div>
+                  <div class="service-name">${svc}</div>
+                  <div class="service-sub">บริการ / Service</div>
+                </div>
+              </div>
+              <div class="card-detail">
+                <span class="detail-icon">📞</span>
+                <div>
+                  <div class="detail-text">${phoneDisplay}</div>
+                  <div class="service-sub">${clientName}</div>
+                </div>
+              </div>
+            </div>
+          </div>`;
+      });
+
+      html += `</div>`;
+      html += `<div class="last-updated" id="last-updated">${formatLastUpdated()}</div>`;
+      html += refreshHTML();
+
+      content.innerHTML = html;
+      attachRefresh();
+    }
+
+    function renderError(msg) {
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div class="error-state">
+          <div class="error-title">โหลดข้อมูลไม่ได้ / Failed to load</div>
+          <div class="error-sub">${msg}</div>
+        </div>
+        ${refreshHTML()}
+      `;
+      document.getElementById('stat-today').textContent    = '–';
+      document.getElementById('stat-upcoming').textContent = '–';
+      document.getElementById('stat-week').textContent     = '–';
+      attachRefresh();
+    }
+
+    function refreshHTML() {
+      return `
+        <div class="refresh-wrap">
+          <button class="refresh-btn" id="refresh-btn">
+            <span>↻</span> โหลดใหม่ / Refresh
+          </button>
+        </div>`;
+    }
+
+    function attachRefresh() {
+      const btn = document.getElementById('refresh-btn');
+      if (btn) btn.addEventListener('click', loadBookings);
+    }
+
+    // ── Fetch ────────────────────────────────────────────────────────────────
+
+    async function loadBookings() {
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <div class="loading-text">กำลังโหลด…<br>Loading bookings…</div>
+        </div>`;
+
+      const nowISO = new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          start_time,
+          end_time,
+          status,
+          clients ( name, phone ),
+          services ( name )
+        `)
+        .eq('business_id', BUSINESS_ID)
+        .in('status', ['confirmed'])
+        .gte('start_time', nowISO)
+        .order('start_time', { ascending: true })
+        .limit(30);
+
+      if (error) {
+        renderError(error.message || 'Unknown error');
+        return;
+      }
+
+      renderBookings(data || []);
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    loadBookings();
+  </script>
+</body>
+</html>
