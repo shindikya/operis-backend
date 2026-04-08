@@ -1,6 +1,14 @@
 const supabase = require('../config/supabase');
 const { OperisError, handleError } = require('../utils/errorHandler');
 const { requireFields, validatePhone, validateFuture } = require('../utils/validation');
+const { sendSms } = require('../services/smsService');
+
+function formatBangkokTime(utcStr) {
+  const d = new Date(new Date(utcStr).getTime() + 7 * 60 * 60 * 1000);
+  const date = `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${d.getUTCFullYear()+543}`;
+  const time = `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+  return { date, time };
+}
 
 // POST /booking
 async function createBooking(req, res) {
@@ -51,13 +59,24 @@ async function createBooking(req, res) {
       clientRecord = newClient;
     }
 
-    // Resolve duration: from service row, or fall back to business slot_duration_min
-    let durationMin = 60;
+    // Always fetch business — needed for duration fallback + owner SMS
+    const { data: business, error: businessError } = await supabase
+      .from('businesses')
+      .select('name, phone, slot_duration_min')
+      .eq('id', business_id)
+      .single();
+
+    if (businessError || !business) {
+      throw new OperisError('Business not found', 'BUSINESS_NOT_FOUND', 404);
+    }
+
+    let durationMin = business.slot_duration_min || 60;
+    let serviceName = null;
 
     if (service_id) {
       const { data: service, error: serviceError } = await supabase
         .from('services')
-        .select('duration_min, is_active')
+        .select('name, duration_min, is_active')
         .eq('id', service_id)
         .single();
 
@@ -68,17 +87,7 @@ async function createBooking(req, res) {
         throw new OperisError('Service is not active', 'SERVICE_INACTIVE', 400);
       }
       durationMin = service.duration_min;
-    } else {
-      const { data: business, error: businessError } = await supabase
-        .from('businesses')
-        .select('slot_duration_min')
-        .eq('id', business_id)
-        .single();
-
-      if (businessError || !business) {
-        throw new OperisError('Business not found', 'BUSINESS_NOT_FOUND', 404);
-      }
-      if (business.slot_duration_min) durationMin = business.slot_duration_min;
+      serviceName = service.name;
     }
 
     const end_time = new Date(
@@ -115,15 +124,48 @@ async function createBooking(req, res) {
         if (error) console.error('increment_client_sessions failed:', error.message);
       });
 
-    // Queue confirmation reminder
-    await supabase.from('reminders').insert({
-      business_id,
-      booking_id: booking.id,
-      type: 'confirmation',
-      channel: 'sms',
-      status: 'pending',
-      scheduled_at: new Date().toISOString()
-    });
+    // SMS owner — soft failure
+    if (business.phone) {
+      const { date, time } = formatBangkokTime(start_time);
+      const svcLabel = serviceName || 'บริการ';
+      const msg = `นัดหมายใหม่: ${client.name} - ${svcLabel} วันที่ ${date} เวลา ${time} โทร: ${client.phone}`;
+      sendSms(business.phone, msg)
+        .catch(err => console.error('Owner SMS failed:', err.message));
+    }
+
+    // Queue reminders — only insert if scheduled_at is still in the future
+    const now          = new Date();
+    const remind24hAt  = new Date(new Date(start_time).getTime() - 24 * 60 * 60 * 1000);
+    const remind1hAt   = new Date(new Date(start_time).getTime() -      60 * 60 * 1000);
+
+    const remindersToInsert = [
+      {
+        business_id,
+        booking_id:   booking.id,
+        type:         'confirmation',
+        channel:      'sms',
+        status:       'pending',
+        scheduled_at: now.toISOString()
+      },
+      remind24hAt > now && {
+        business_id,
+        booking_id:   booking.id,
+        type:         'reminder_24h',
+        channel:      'sms',
+        status:       'pending',
+        scheduled_at: remind24hAt.toISOString()
+      },
+      remind1hAt > now && {
+        business_id,
+        booking_id:   booking.id,
+        type:         'reminder_1h',
+        channel:      'sms',
+        status:       'pending',
+        scheduled_at: remind1hAt.toISOString()
+      }
+    ].filter(Boolean);
+
+    await supabase.from('reminders').insert(remindersToInsert);
 
     return res.status(201).json({ booking });
   } catch (err) {

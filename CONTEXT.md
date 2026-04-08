@@ -85,12 +85,12 @@ The target market is solopreneur and small-team service businesses in Thailand (
 | 2 | Server + Railway | DONE |
 | 3 | Booking + Availability | DONE |
 | 4 | Call Routing | DONE |
-| 5 | Twilio Service | NOT BUILT |
+| 5 | Twilio Service | PARTIAL |
 | 6 | Stripe Billing | NOT BUILT |
 | 7 | Provision Orchestrator | DONE |
 | 8 | Multilingual Thai | DONE |
-| 9 | Reminder System | NOT BUILT |
-| 10 | Missed Call Recovery | NOT BUILT |
+| 9 | Reminder System | DONE |
+| 10 | Missed Call Recovery | DONE |
 | 11 | Re-engagement Outreach | NOT BUILT |
 | 12 | No-Show Protection + Deposits | NOT BUILT |
 | 13 | Google Review Collection | NOT BUILT |
@@ -150,7 +150,9 @@ operis-backend/
 │   │   ├── onboarding.js
 │   │   └── demo.js
 │   ├── services/
-│   │   └── provisionOrchestrator.js    # getVapiConfig, buildSystemPrompt, provisionBusiness
+│   │   ├── provisionOrchestrator.js    # getVapiConfig, buildSystemPrompt, provisionBusiness
+│   │   ├── smsService.js               # Twilio SMS wrapper — sendSms(to, body)
+│   │   └── reminderService.js          # Hourly cron — processes pending reminders from DB
 │   └── utils/
 │       ├── errorHandler.js             # OperisError class + handleError
 │       ├── validation.js               # requireFields, validatePhone, validateEmail, validateDatetime, validateFuture
@@ -176,13 +178,13 @@ operis-backend/
 |---|---|---|
 | GET | `/` | Root — returns `"Operis backend running"` |
 | GET | `/health` | Health check — queries Supabase `businesses` table |
-| POST | `/booking` | Create booking — validates, upserts client, inserts booking, queues reminder |
+| POST | `/booking` | Create booking — validates, upserts client, inserts booking, queues reminders, SMS owner |
 | GET | `/booking/:id` | Get booking with client/service/staff joins |
 | GET | `/booking/business/:business_id` | List bookings with status/from/to/limit filters |
 | PATCH | `/booking/:id/cancel` | Cancel booking and pending reminders |
 | GET | `/availability` | Generate available slots from staff schedules |
 | POST | `/call/inbound` | Twilio webhook — looks up number, logs session, returns TwiML |
-| POST | `/call/vapi-callback` | Vapi end-of-call webhook — updates call_session record |
+| POST | `/call/vapi-callback` | Vapi end-of-call webhook — updates call_session, sends missed call recovery SMS if no booking |
 | POST | `/onboarding/provision` | Create Vapi agent + insert phone_numbers row + mark onboarding complete |
 | GET | `/demo` | Mobile HTML demo setup page |
 | POST | `/demo/setup` | Patch shared demo Vapi agent with shop name + language |
@@ -202,6 +204,9 @@ operis-backend/
 - **Provision rollback** — if Vapi agent is created but Supabase write fails, the agent is deleted before the error is thrown
 - **PORT** — never hard-coded; Railway controls it via environment variable
 - **Voice provider** — Cartesia sonic-multilingual for both Thai and English; no ElevenLabs dependency
+- **SMS** — all outbound SMS via `smsService.js` (Twilio wrapper); fire-and-forget on all non-critical paths (owner notification, missed call recovery, reminders) — fails silently if Twilio credentials are not set
+- **Reminder cron** — `reminderService.js` runs on server startup then every hour; queries `reminders` table for `pending` rows with `scheduled_at <= now`, sends SMS, marks `sent` or `failed`
+- **Stale reminder guard** — at booking creation time, `reminder_24h` and `reminder_1h` rows are only inserted if their `scheduled_at` is in the future
 
 ---
 
@@ -218,9 +223,9 @@ operis-backend/
 | `CARTESIA_VOICE_EN` | Cartesia voice ID for English | Required for provisioning — not yet set |
 | `DEMO_VAPI_AGENT_ID` | Pre-created Vapi agent ID for demo page | Required for demo — not yet set |
 | `DEMO_TWILIO_NUMBER` | Twilio number shown on demo page | Required for demo — not yet set |
-| `TWILIO_ACCOUNT_SID` | Twilio account identifier | Required for call routing — not yet set |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token | Required for call routing — not yet set |
-| `TWILIO_PHONE_NUMBER` | Twilio inbound number | Required for call routing — not yet set |
+| `TWILIO_ACCOUNT_SID` | Twilio account identifier | Required for SMS + call routing — not yet set in Railway |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | Required for SMS + call routing — not yet set in Railway |
+| `TWILIO_PHONE_NUMBER` | Twilio outbound SMS number | Required for SMS — not yet set in Railway |
 | `STRIPE_SECRET_KEY` | Stripe secret key | Deferred — not yet set |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | Deferred — not yet set |
 | `STRIPE_PRICE_ID` | Stripe price ID | Deferred — not yet set |

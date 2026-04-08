@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const { buildVapiContext } = require('../utils/vapiContext');
 const { handleError } = require('../utils/errorHandler');
+const { sendSms } = require('../services/smsService');
 
 // Helper — returns TwiML with a spoken message then hangs up
 function twimlSay(message) {
@@ -108,25 +109,86 @@ async function handleVapiCallback(req, res) {
     }
 
     if (message.type === 'end-of-call-report') {
-      const call = message.call ?? {};
-      const vapiCallId = call.id;
+      const call         = message.call ?? {};
+      const vapiCallId   = call.id;
+      const callerPhone  = call.customer?.number ?? null;
+      const endedReason  = call.endedReason ?? 'unknown';
+      const durationSec  = call.duration ? Math.round(call.duration) : null;
+      const recordingUrl = call.recordingUrl ?? null;
+      const endedAt      = call.endedAt ?? new Date().toISOString();
+      const startedAt    = call.startedAt ?? null;
 
-      if (!vapiCallId) {
-        return res.status(400).json({ error: 'Missing call.id', code: 'MISSING_CALL_ID' });
+      // Find the open call_session for this caller (vapi_call_id not set at insert time)
+      let sessionBusinessId = null;
+
+      if (callerPhone) {
+        const { data: session } = await supabase
+          .from('call_sessions')
+          .select('id, business_id')
+          .eq('caller_number', callerPhone)
+          .is('ended_at', null)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (session) {
+          sessionBusinessId = session.business_id;
+          const { error: updateError } = await supabase
+            .from('call_sessions')
+            .update({
+              vapi_call_id:  vapiCallId,
+              outcome:       endedReason,
+              duration_sec:  durationSec,
+              recording_url: recordingUrl,
+              ended_at:      endedAt
+            })
+            .eq('id', session.id);
+
+          if (updateError) {
+            console.error('Failed to update call_session:', updateError.message);
+          }
+        }
       }
 
-      const { error: updateError } = await supabase
-        .from('call_sessions')
-        .update({
-          outcome:       call.endedReason     ?? 'unknown',
-          duration_sec:  call.duration        ? Math.round(call.duration) : null,
-          recording_url: call.recordingUrl    ?? null,
-          ended_at:      call.endedAt         ?? new Date().toISOString()
-        })
-        .eq('vapi_call_id', vapiCallId);
+      // Missed call recovery — send SMS if no booking was created during this call
+      if (callerPhone && sessionBusinessId) {
+        const since = startedAt ?? new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
-      if (updateError) {
-        console.error('Failed to update call_session:', updateError.message);
+        const { data: clientRecord } = await supabase
+          .from('clients')
+          .select('id')
+          .eq('business_id', sessionBusinessId)
+          .eq('phone', callerPhone)
+          .maybeSingle();
+
+        let bookingCreated = false;
+        if (clientRecord) {
+          const { data: booking } = await supabase
+            .from('bookings')
+            .select('id')
+            .eq('business_id', sessionBusinessId)
+            .eq('client_id', clientRecord.id)
+            .gte('created_at', since)
+            .limit(1)
+            .maybeSingle();
+          bookingCreated = !!booking;
+        }
+
+        if (!bookingCreated) {
+          const { data: phoneRecord } = await supabase
+            .from('phone_numbers')
+            .select('number')
+            .eq('business_id', sessionBusinessId)
+            .eq('status', 'active')
+            .limit(1)
+            .maybeSingle();
+
+          const businessPhone = phoneRecord?.number ?? '';
+          const msg = `สวัสดีครับ ขอโทษที่ไม่ได้รับสาย ต้องการจองนัดหมายไหมครับ? โทรกลับได้เลยครับ ${businessPhone}`.trim();
+
+          sendSms(callerPhone, msg)
+            .catch(err => console.error('Missed call SMS failed:', err.message));
+        }
       }
     }
 

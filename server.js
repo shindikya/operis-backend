@@ -8,6 +8,7 @@ const availabilityRoutes = require('./backend/routes/availability');
 const callRoutes = require('./backend/routes/call');
 const onboardingRoutes = require('./backend/routes/onboarding');
 const demoRoutes = require('./backend/routes/demo');
+const { startReminderCron } = require('./backend/services/reminderService');
 
 const app = express();
 app.use(cors());
@@ -44,4 +45,5 @@ app.use('/demo', demoRoutes);
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startReminderCron();
 });

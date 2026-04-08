@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Layers 1–4 complete and tested. Layer 7 (Provision Orchestrator) built with multilingual Thai support. Layer 8 (Multilingual Thai) built — Vapi config, Thai system prompt, demo page. Deployed to Railway. Layers 5, 6, 9–20 not yet built.
+Layers 1–4, 7, 8, 9, 10 complete. Layer 5 (Twilio) partial — smsService.js built and wired, credentials not yet added to Railway. Backend fully deployed on Railway. Saturday door-to-door demos planned in Nonthaburi. Frontend (provision.html, dashboard.html, index.html) being built by partner. Phase 2 begins after demos confirm demand.
 
 ---
 
@@ -24,11 +24,17 @@ Layers 1–4 complete and tested. Layer 7 (Provision Orchestrator) built with mu
 - [x] `PATCH /booking/:id/cancel` — cancels booking and pending reminders
 - [x] `GET /availability` — loads schedule, generates slots, removes conflicts and past times
 - [x] `POST /call/inbound` — looks up phone_numbers → business → client, logs call_sessions, returns TwiML
-- [x] `POST /call/vapi-callback` — updates call_sessions with outcome/duration/recording on end-of-call
+- [x] `POST /call/vapi-callback` — updates call_sessions with outcome/duration/recording; sends missed call recovery SMS if no booking created
 - [x] `POST /onboarding/provision` — creates Vapi agent, inserts phone_numbers row, marks onboarding complete, rolls back on failure
 - [x] `backend/services/provisionOrchestrator.js` — `getVapiConfig(business, language)` with Cartesia voice (Thai + English), `buildSystemPrompt(business, language)` with full Thai prompt
 - [x] `GET /demo` — mobile HTML demo setup page (Thai/English toggle, dark theme, no dependencies)
 - [x] `POST /demo/setup` — patches shared DEMO_VAPI_AGENT_ID with shop name and language greeting
+- [x] `backend/services/smsService.js` — Twilio SMS wrapper; throws if credentials missing (all callers handle as soft failure)
+- [x] `backend/services/reminderService.js` — hourly cron; queries pending reminders, sends Thai SMS, marks sent/failed
+- [x] `POST /booking` sends owner SMS on booking creation (fire-and-forget)
+- [x] `POST /booking` inserts confirmation + 24h + 1h reminder rows; skips 24h/1h if already in the past
+- [x] `POST /call/vapi-callback` fixed session lookup bug (was matching on vapi_call_id never set at insert time — now matches by caller_number + ended_at IS NULL)
+- [x] `twilio@^5.13.1` installed
 
 ---
 
@@ -84,16 +90,26 @@ Layers 1–4 complete and tested. Layer 7 (Provision Orchestrator) built with mu
 - [x] Reset button
 
 ### Twilio Service (Layer 5)
-- [ ] Not built
+- [x] `backend/services/smsService.js` — `sendSms(to, body)` Twilio wrapper
+- [x] Wired into bookingController (owner SMS) and callController (missed call recovery) and reminderService
+- [ ] Twilio credentials not yet added to Railway — SMS inactive until set
 
 ### Stripe Billing (Layer 6)
 - [ ] Not built — billing handled manually via PromptPay for now
 
 ### Reminder System (Layer 9)
-- [ ] Not built
+- [x] `backend/services/reminderService.js` — hourly cron via setInterval
+- [x] Processes `pending` reminders with `scheduled_at <= now` from Supabase
+- [x] Sends Thai SMS per type: confirmation, reminder_24h, reminder_1h
+- [x] Marks each reminder `sent` or `failed` after attempt
+- [x] Stale reminder guard — 24h and 1h rows skipped at insert time if already past
+- [x] Cron starts on server boot via `startReminderCron()` in server.js
 
 ### Missed Call Recovery (Layer 10)
-- [ ] Not built
+- [x] Fires in `handleVapiCallback` when end-of-call-report received
+- [x] Checks if a booking was created for this caller since call started
+- [x] If no booking: sends Thai SMS to caller with business callback number
+- [x] Fire-and-forget — never blocks callback response
 
 ### Layers 11–20
 - [ ] Not built
@@ -104,15 +120,15 @@ Layers 1–4 complete and tested. Layer 7 (Provision Orchestrator) built with mu
 
 | Issue | Detail |
 |---|---|
+| Twilio credentials not in Railway | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` — all SMS inactive until set |
 | Layer 4 not tested end-to-end | Needs a live Twilio number and a `phone_numbers` row with `vapi_agent_id` populated |
 | No reschedule endpoint | `PATCH /booking/:id` not built |
-| No Twilio service | Outbound SMS (confirmations, reminders) not wired to Twilio yet |
 | No Stripe | Billing handled manually via PromptPay — Stripe integration deferred |
-| No Vapi function-call handling | Vapi can't trigger bookings mid-call yet |
 | No test runner | `npm test` exits with error |
 | CARTESIA_VOICE_TH / EN not set | Need Cartesia voice IDs added to Railway |
 | DEMO_VAPI_AGENT_ID not set | Need a pre-created Vapi agent ID added to Railway |
 | DEMO_TWILIO_NUMBER not set | Need demo Twilio number added to Railway |
+| Frontend not built | provision.html, dashboard.html, index.html — being built by partner |
 
 ---
 
@@ -130,9 +146,9 @@ Layers 1–4 complete and tested. Layer 7 (Provision Orchestrator) built with mu
 | `CARTESIA_VOICE_EN` | Yes (for English voice) | Not set |
 | `DEMO_VAPI_AGENT_ID` | Yes (for demo page) | Not set |
 | `DEMO_TWILIO_NUMBER` | Yes (for demo page) | Not set |
-| `TWILIO_ACCOUNT_SID` | Yes (for call routing) | Not set |
-| `TWILIO_AUTH_TOKEN` | Yes (for call routing) | Not set |
-| `TWILIO_PHONE_NUMBER` | Yes (for call routing) | Not set |
+| `TWILIO_ACCOUNT_SID` | Yes (for SMS + call routing) | Not set — add to Railway |
+| `TWILIO_AUTH_TOKEN` | Yes (for SMS + call routing) | Not set — add to Railway |
+| `TWILIO_PHONE_NUMBER` | Yes (for outbound SMS) | Not set — add to Railway |
 | `STRIPE_SECRET_KEY` | Deferred | Not set |
 | `STRIPE_WEBHOOK_SECRET` | Deferred | Not set |
 | `STRIPE_PRICE_ID` | Deferred | Not set |
@@ -264,6 +280,23 @@ Layers 1–4 complete and tested. Layer 7 (Provision Orchestrator) built with mu
 - Updated CONTEXT.md with full product overview, all 20 layers, pricing, billing model
 
 **Billing note:** Stripe deferred — payment handled manually via PromptPay for now.
+
+---
+
+### Session 9 — 2026-04-08
+
+**Goal:** Build Layer 5 (Twilio SMS), Layer 9 (Reminder System), Layer 10 (Missed Call Recovery).
+
+**Completed:**
+- Created `backend/services/smsService.js` — thin Twilio wrapper, throws if credentials missing
+- Installed `twilio@^5.13.1`
+- Updated `bookingController.js`: always fetches business (name, phone, slot_duration_min); captures service name; sends owner SMS on booking creation; inserts confirmation + 24h + 1h reminders; skips 24h/1h if already past (stale reminder guard)
+- Created `backend/services/reminderService.js` — hourly cron, queries pending reminders, sends Thai SMS per type, marks sent/failed
+- Wired `startReminderCron()` into `server.js` — starts on boot
+- Rewrote `handleVapiCallback` in `callController.js`: fixed session lookup bug (now matches by caller_number + ended_at IS NULL instead of vapi_call_id); added missed call recovery — checks for booking since call started, sends Thai SMS to caller if none found
+- Updated CONTEXT.md and PROGRESS.md
+
+**Pending:** Twilio credentials to be added to Railway before SMS activates. Full end-to-end test after credentials set.
 
 ---
 
