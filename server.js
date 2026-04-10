@@ -7,6 +7,7 @@ const bookingRoutes = require('./backend/routes/booking');
 const availabilityRoutes = require('./backend/routes/availability');
 const callRoutes = require('./backend/routes/call');
 const onboardingRoutes = require('./backend/routes/onboarding');
+const provisionRoutes = require('./backend/routes/provision');
 const demoRoutes = require('./backend/routes/demo');
 const { startReminderCron } = require('./backend/services/reminderService');
 
@@ -39,6 +40,7 @@ app.use('/booking', bookingRoutes);
 app.use('/availability', availabilityRoutes);
 app.use('/call', callRoutes);
 app.use('/onboarding', onboardingRoutes);
+app.use('/provision', provisionRoutes);
 app.use('/demo', demoRoutes);
 
 // Start server

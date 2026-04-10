@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Operis — Provision</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      --black:       #111111;
+      --dark:        #1A1A1A;
+      --card:        #222222;
+      --border:      #333333;
+      --white:       #F5F5F5;
+      --dim:         #888888;
+      --accent:      #E8751A;
+      --accent-hover:#F28A33;
+      --red:         #D44;
+      --red-bg:      rgba(221,68,68,0.1);
+      --green:       #1B7A3D;
+      --radius:      10px;
+    }
+
+    html, body {
+      min-height: 100%;
+      background: var(--black);
+      color: var(--white);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .wrap {
+      width: 100%;
+      max-width: 420px;
+    }
+
+    /* ── Header ── */
+    .brand {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .brand-mark {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 2px;
+    }
+
+    .brand-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--white);
+      margin-top: 6px;
+    }
+
+    .brand-sub {
+      font-size: 13px;
+      color: var(--dim);
+      margin-top: 2px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 22px;
+    }
+
+    /* ── Form ── */
+    .form-group { margin-bottom: 18px; }
+
+    .form-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--dim);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .form-input {
+      width: 100%;
+      background: var(--dark);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      color: var(--white);
+      font-family: inherit;
+      font-size: 15px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+    }
+
+    .form-input:focus { border-color: var(--accent); }
+    .form-input::placeholder { color: #555; }
+
+    /* ── Language toggle ── */
+    .lang-toggle {
+      display: flex;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .lang-option {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--dark);
+      color: var(--dim);
+      border: none;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .lang-option + .lang-option { border-left: 1.5px solid var(--border); }
+
+    .lang-option.active {
+      background: var(--accent);
+      color: var(--black);
+    }
+
+    /* ── Submit ── */
+    .submit-btn {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 6px;
+    }
+
+    .submit-btn:active { background: var(--accent-hover); }
+    .submit-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* ── Error ── */
+    .error-msg {
+      display: none;
+      background: var(--red-bg);
+      border: 1px solid rgba(221,68,68,0.3);
+      border-radius: 8px;
+      color: var(--red);
+      font-size: 13px;
+      padding: 10px 14px;
+      margin-top: 14px;
+      text-align: center;
+    }
+
+    .error-msg.visible { display: block; }
+
+    /* ── Loading state ── */
+    .loading-state {
+      display: none;
+      text-align: center;
+      padding: 48px 16px;
+    }
+
+    .loading-state.visible { display: block; }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+      margin-bottom: 20px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-label {
+      font-size: 15px;
+      color: var(--dim);
+    }
+
+    /* ── Success state ── */
+    .success-state {
+      display: none;
+      text-align: center;
+      padding: 32px 16px;
+    }
+
+    .success-state.visible { display: block; }
+
+    .success-check {
+      font-size: 48px;
+      display: block;
+      margin-bottom: 12px;
+      color: var(--green);
+    }
+
+    .success-label {
+      font-size: 14px;
+      color: var(--dim);
+      margin-bottom: 20px;
+    }
+
+    .phone-display {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--white);
+      letter-spacing: 1px;
+      margin-bottom: 24px;
+      word-break: break-all;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .action-btn {
+      flex: 1;
+      padding: 14px;
+      border-radius: var(--radius);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.15s;
+    }
+
+    .btn-copy {
+      background: var(--card);
+      border: 1.5px solid var(--border);
+      color: var(--white);
+    }
+
+    .btn-copy:active { background: var(--border); }
+    .btn-copy.copied { border-color: var(--green); color: var(--green); }
+
+    .btn-call {
+      background: var(--accent);
+      border: 1.5px solid var(--accent);
+      color: #fff;
+    }
+
+    .btn-call:active { background: var(--accent-hover); }
+
+    .reset-btn {
+      background: transparent;
+      border: none;
+      color: var(--dim);
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 14px 0 0;
+      display: block;
+      width: 100%;
+      text-align: center;
+    }
+
+    .reset-btn:active { color: var(--white); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="brand">
+      <div class="brand-mark">OPERIS</div>
+      <div class="brand-title">Provision</div>
+      <div class="brand-sub">Create a new AI receptionist</div>
+    </div>
+
+    <!-- ═══ Form ═══ -->
+    <div class="card" id="form-card">
+      <form id="provision-form" novalidate>
+        <div class="form-group">
+          <label class="form-label" for="biz-name">Business Name</label>
+          <input class="form-input" type="text" id="biz-name" placeholder="e.g. Ton's Barbershop" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="owner-phone">Owner Phone Number</label>
+          <input class="form-input" type="tel" id="owner-phone" placeholder="+66812345678" inputmode="tel" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Language</label>
+          <div class="lang-toggle">
+            <button type="button" class="lang-option active" data-lang="th">ไทย</button>
+            <button type="button" class="lang-option" data-lang="en">English</button>
+          </div>
+        </div>
+
+        <button class="submit-btn" type="submit" id="submit-btn">Create Receptionist</button>
+        <div class="error-msg" id="error-msg"></div>
+      </form>
+    </div>
+
+    <!-- ═══ Loading ═══ -->
+    <div class="card loading-state" id="loading-state">
+      <div class="spinner"></div>
+      <div class="loading-label">Setting up your AI receptionist...</div>
+    </div>
+
+    <!-- ═══ Success ═══ -->
+    <div class="card success-state" id="success-state">
+      <span class="success-check">&#10003;</span>
+      <div class="success-label">Receptionist is live</div>
+      <div class="phone-display" id="phone-display"></div>
+      <div class="action-row">
+        <button class="action-btn btn-copy" id="copy-btn">Copy</button>
+        <a class="action-btn btn-call" id="call-btn" href="tel:">Call Now</a>
+      </div>
+      <button class="reset-btn" id="reset-btn">+ Create another</button>
+    </div>
+
+  </div>
+
+  <script>
+    const API_URL = 'https://operis-backend-production-3533.up.railway.app/provision';
+
+    let selectedLang = 'th';
+
+    // ── Language toggle ─────────────────────────────────────────────────────
+    document.querySelectorAll('.lang-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.lang-option').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedLang = btn.dataset.lang;
+      });
+    });
+
+    // ── Refs ─────────────────────────────────────────────────────────────────
+    const formCard     = document.getElementById('form-card');
+    const loadingState = document.getElementById('loading-state');
+    const successState = document.getElementById('success-state');
+    const errorMsg     = document.getElementById('error-msg');
+    const form         = document.getElementById('provision-form');
+    const submitBtn    = document.getElementById('submit-btn');
+
+    function showView(view) {
+      formCard.style.display     = view === 'form'    ? '' : 'none';
+      loadingState.classList.toggle('visible', view === 'loading');
+      successState.classList.toggle('visible', view === 'success');
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.classList.add('visible');
+    }
+
+    function clearError() {
+      errorMsg.classList.remove('visible');
+    }
+
+    // ── Submit ───────────────────────────────────────────────────────────────
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearError();
+
+      const businessName = document.getElementById('biz-name').value.trim();
+      const ownerPhone   = document.getElementById('owner-phone').value.trim();
+
+      if (!businessName) { showError('Business name is required'); return; }
+      if (!ownerPhone)   { showError('Phone number is required'); return; }
+
+      submitBtn.disabled = true;
+      showView('loading');
+
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ businessName, ownerPhone, language: selectedLang })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || data.message || 'Server error ' + res.status);
+        }
+
+        const phone = data.phone_number || ownerPhone;
+        document.getElementById('phone-display').textContent = phone;
+        document.getElementById('call-btn').href = 'tel:' + phone;
+
+        // Copy button
+        const copyBtn = document.getElementById('copy-btn');
+        copyBtn.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(phone);
+            copyBtn.textContent = 'Copied';
+            copyBtn.classList.add('copied');
+            setTimeout(() => {
+              copyBtn.textContent = 'Copy';
+              copyBtn.classList.remove('copied');
+            }, 2000);
+          } catch {
+            copyBtn.textContent = 'Failed';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+          }
+        };
+
+        showView('success');
+
+      } catch (err) {
+        showView('form');
+        showError(err.message);
+      }
+
+      submitBtn.disabled = false;
+    });
+
+    // ── Reset ────────────────────────────────────────────────────────────────
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      form.reset();
+      document.querySelectorAll('.lang-option').forEach(b => b.classList.remove('active'));
+      document.querySelector('[data-lang="th"]').classList.add('active');
+      selectedLang = 'th';
+      clearError();
+      showView('form');
+    });
+  </script>
+</body>
+</html>
