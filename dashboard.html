@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <title>Test Barbershop — Dashboard</title>
+  <title>Operis Dashboard</title>
   <style>
     * {
       box-sizing: border-box;
@@ -373,6 +373,24 @@
       border-color: var(--gold);
     }
 
+    /* ── Logout button ── */
+    .logout-btn {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--cream-dim);
+      background: transparent;
+      border: 1px solid rgba(184,176,160,0.3);
+      border-radius: 20px;
+      padding: 3px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+
+    .logout-btn:active {
+      background: rgba(184,176,160,0.1);
+    }
+
     /* ── Last updated ── */
     .last-updated {
       text-align: center;
@@ -387,8 +405,11 @@
   <!-- Header -->
   <div class="header">
     <div class="header-top">
-      <span class="shop-name">Test Barbershop</span>
-      <span class="header-badge">OPERIS</span>
+      <span class="shop-name" id="shop-name">–</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="header-badge">OPERIS</span>
+        <button class="logout-btn" id="logout-btn">ออกจากระบบ</button>
+      </div>
     </div>
     <div class="header-sub">ระบบนัดหมาย &nbsp;·&nbsp; Booking Dashboard</div>
   </div>
@@ -425,10 +446,11 @@
   <script>
     const SUPABASE_URL  = 'https://grzghjoughjqyguabaxx.supabase.co';
     const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdyemdoam91Z2hqcXlndWFiYXh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5Njc5NzEsImV4cCI6MjA5MDU0Mzk3MX0.lIXBtNMhAQBVR-0uctE52ULzFcyegxPnKr3CAIpJLcU';
-    const BUSINESS_ID   = 'ab621411-ce0c-4529-92cb-26ca06cbd16e';
     const TZ_OFFSET_MS  = 7 * 60 * 60 * 1000; // UTC+7 Bangkok
 
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    let businessId = null;
 
     // ── Date helpers (UTC+7, no external libs) ──────────────────────────────
 
@@ -652,7 +674,7 @@
           clients ( name, phone ),
           services ( name )
         `)
-        .eq('business_id', BUSINESS_ID)
+        .eq('business_id', businessId)
         .in('status', ['confirmed'])
         .gte('start_time', nowISO)
         .order('start_time', { ascending: true })
@@ -667,7 +689,52 @@
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────
-    loadBookings();
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      window.location.href = 'login.html';
+    });
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        window.location.href = 'login.html';
+        return;
+      }
+
+      const { data: business, error } = await supabase
+        .from('businesses')
+        .select('id, name')
+        .eq('owner_user_id', session.user.id)
+        .single();
+
+      if (error || !business) {
+        renderError('ไม่พบข้อมูลร้าน / No business found for this account');
+        return;
+      }
+
+      // Check if onboarding is needed (no services or no hours)
+      const { count: svcCount } = await supabase
+        .from('services')
+        .select('id', { count: 'exact', head: true })
+        .eq('business_id', business.id);
+
+      const { count: hoursCount } = await supabase
+        .from('availability_windows')
+        .select('id', { count: 'exact', head: true })
+        .eq('business_id', business.id);
+
+      if (svcCount === 0 || hoursCount === 0) {
+        window.location.href = 'onboarding.html';
+        return;
+      }
+
+      businessId = business.id;
+      document.getElementById('shop-name').textContent = business.name;
+      loadBookings();
+    }
+
+    init();
   </script>
 </body>
 </html>

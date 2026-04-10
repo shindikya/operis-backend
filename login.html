@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Operis — เข้าสู่ระบบ</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      --green-dark:  #0F2318;
+      --green-deep:  #1B3A2A;
+      --green-card:  #1F3D2C;
+      --gold:        #D4A843;
+      --gold-light:  #E8C547;
+      --gold-dim:    #A07B2A;
+      --cream:       #F5F0E8;
+      --cream-dim:   #B8B0A0;
+      --radius:      12px;
+    }
+
+    html, body {
+      min-height: 100%;
+      background: var(--green-dark);
+      color: var(--cream);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+    }
+
+    .login-wrap {
+      width: 100%;
+      max-width: 360px;
+    }
+
+    /* ── Brand ── */
+    .brand {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .brand-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--gold);
+      background: rgba(212,168,67,0.15);
+      border: 1px solid var(--gold-dim);
+      border-radius: 20px;
+      padding: 4px 14px;
+      letter-spacing: 1.5px;
+      margin-bottom: 14px;
+    }
+
+    .brand-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--cream);
+    }
+
+    .brand-sub {
+      font-size: 13px;
+      color: var(--cream-dim);
+      margin-top: 4px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--green-card);
+      border: 1px solid rgba(212,168,67,0.18);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.4);
+    }
+
+    /* ── Form ── */
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--cream-dim);
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      margin-bottom: 7px;
+    }
+
+    .form-input {
+      width: 100%;
+      background: var(--green-deep);
+      border: 1.5px solid rgba(212,168,67,0.2);
+      border-radius: 8px;
+      color: var(--cream);
+      font-family: inherit;
+      font-size: 15px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+    }
+
+    .form-input:focus {
+      border-color: var(--gold-dim);
+    }
+
+    .form-input::placeholder {
+      color: rgba(184,176,160,0.35);
+    }
+
+    .submit-btn {
+      width: 100%;
+      background: var(--gold);
+      border: none;
+      border-radius: var(--radius);
+      color: var(--green-dark);
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 4px;
+    }
+
+    .submit-btn:active {
+      background: var(--gold-light);
+    }
+
+    .submit-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    /* ── Error ── */
+    .error-msg {
+      display: none;
+      background: rgba(192,57,43,0.15);
+      border: 1px solid rgba(192,57,43,0.35);
+      border-radius: 8px;
+      color: #e07b6e;
+      font-size: 13px;
+      padding: 10px 14px;
+      margin-top: 14px;
+      text-align: center;
+    }
+
+    .error-msg.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+
+    <div class="brand">
+      <div class="brand-badge">OPERIS</div>
+      <div class="brand-title">เข้าสู่ระบบ</div>
+      <div class="brand-sub">Owner Dashboard &nbsp;·&nbsp; เจ้าของร้าน</div>
+    </div>
+
+    <div class="card">
+      <form id="login-form" novalidate>
+        <div class="form-group">
+          <label class="form-label" for="email">อีเมล / Email</label>
+          <input
+            class="form-input"
+            type="email"
+            id="email"
+            name="email"
+            placeholder="you@example.com"
+            autocomplete="email"
+            inputmode="email"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="password">รหัสผ่าน / Password</label>
+          <input
+            class="form-input"
+            type="password"
+            id="password"
+            name="password"
+            placeholder="••••••••"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+        <button class="submit-btn" type="submit" id="submit-btn">
+          เข้าสู่ระบบ / Sign in
+        </button>
+        <div class="error-msg" id="error-msg"></div>
+      </form>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    const SUPABASE_URL  = 'https://grzghjoughjqyguabaxx.supabase.co';
+    const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdyemdoam91Z2hqcXlndWFiYXh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5Njc5NzEsImV4cCI6MjA5MDU0Mzk3MX0.lIXBtNMhAQBVR-0uctE52ULzFcyegxPnKr3CAIpJLcU';
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    // Already logged in — skip straight to dashboard
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) window.location.href = 'dashboard.html';
+    })();
+
+    const form     = document.getElementById('login-form');
+    const btn      = document.getElementById('submit-btn');
+    const errorMsg = document.getElementById('error-msg');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const email    = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+
+      errorMsg.classList.remove('visible');
+      btn.disabled    = true;
+      btn.textContent = 'กำลังเข้าสู่ระบบ…';
+
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        errorMsg.textContent = error.message === 'Invalid login credentials'
+          ? 'อีเมลหรือรหัสผ่านไม่ถูกต้อง / Invalid email or password'
+          : error.message;
+        errorMsg.classList.add('visible');
+        btn.disabled    = false;
+        btn.textContent = 'เข้าสู่ระบบ / Sign in';
+        return;
+      }
+
+      window.location.href = 'dashboard.html';
+    });
+  </script>
+</body>
+</html>
