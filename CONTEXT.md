@@ -100,7 +100,7 @@ The target market is solopreneur and small-team service businesses in Thailand (
 | 17 | Seasonal Campaigns | NOT BUILT |
 | 18 | Waitlist Management | NOT BUILT |
 | 19 | Staff Optimisation | NOT BUILT |
-| 20 | Dashboard Frontend | NOT BUILT |
+| 20 | Dashboard Frontend | DONE |
 
 ---
 
@@ -134,6 +134,10 @@ operis-backend/
 ├── .gitignore                          # Excludes .env, node_modules, .DS_Store
 ├── CONTEXT.md                          # This file
 ├── PROGRESS.md                         # Build status and session log
+├── login.html                          # Owner login page (Supabase Auth)
+├── dashboard.html                      # Owner dashboard — scoped per business via auth
+├── onboarding.html                     # 3-step owner onboarding wizard
+├── provision.html                      # Internal tool — create business + AI receptionist
 ├── backend/
 │   ├── config/
 │   │   └── supabase.js                 # Supabase client (uses env vars)
@@ -142,12 +146,14 @@ operis-backend/
 │   │   ├── availabilityController.js   # GET availability slots
 │   │   ├── callController.js           # POST /call/inbound, /call/vapi-callback
 │   │   ├── onboardingController.js     # POST /onboarding/provision
+│   │   ├── provisionController.js      # POST /provision — create business + provision agent
 │   │   └── demoController.js           # GET /demo (HTML page), POST /demo/setup
 │   ├── routes/
 │   │   ├── booking.js
 │   │   ├── availability.js
 │   │   ├── call.js
 │   │   ├── onboarding.js
+│   │   ├── provision.js
 │   │   └── demo.js
 │   ├── services/
 │   │   ├── provisionOrchestrator.js    # getVapiConfig, buildSystemPrompt, provisionBusiness
@@ -185,7 +191,8 @@ operis-backend/
 | GET | `/availability` | Generate available slots from staff schedules |
 | POST | `/call/inbound` | Twilio webhook — looks up number, logs session, returns TwiML |
 | POST | `/call/vapi-callback` | Vapi end-of-call webhook — updates call_session, sends missed call recovery SMS if no booking |
-| POST | `/onboarding/provision` | Create Vapi agent + insert phone_numbers row + mark onboarding complete |
+| POST | `/onboarding/provision` | Create Vapi agent + insert phone_numbers row + mark onboarding complete (requires existing business) |
+| POST | `/provision` | Create business row + provision Vapi agent + phone_numbers row in one step (used by provision.html) |
 | GET | `/demo` | Mobile HTML demo setup page |
 | POST | `/demo/setup` | Patch shared demo Vapi agent with shop name + language |
 
@@ -207,6 +214,9 @@ operis-backend/
 - **SMS** — all outbound SMS via `smsService.js` (Twilio wrapper); fire-and-forget on all non-critical paths (owner notification, missed call recovery, reminders) — fails silently if Twilio credentials are not set
 - **Reminder cron** — `reminderService.js` runs on server startup then every hour; queries `reminders` table for `pending` rows with `scheduled_at <= now`, sends SMS, marks `sent` or `failed`
 - **Stale reminder guard** — at booking creation time, `reminder_24h` and `reminder_1h` rows are only inserted if their `scheduled_at` is in the future
+- **Owner login** — Supabase Auth (email + password); `businesses.owner_user_id` links auth user to their business; all dashboard queries scoped via session
+- **Onboarding detection** — dashboard checks for services + availability_windows; redirects to onboarding wizard if either is missing
+- **Provision tool** — `POST /provision` creates business row + Vapi agent in one call; `provision.html` is an internal mobile tool for the founder
 
 ---
 
@@ -232,6 +242,25 @@ operis-backend/
 | `FRONTEND_URL` | Frontend origin for CORS | Not yet set |
 | `BASE_URL` | Public Railway URL | Required for Twilio webhooks — not yet set |
 | `NODE_ENV` | Runtime environment | Set to `production` in Railway |
+
+---
+
+## Database Schema Additions (Phase 2)
+
+| Table | Column | Purpose |
+|---|---|---|
+| `businesses` | `owner_user_id` (uuid, FK → auth.users, UNIQUE) | Links Supabase Auth user to their business |
+
+### RLS Policies Required
+
+| Table | Policy | Status |
+|---|---|---|
+| `businesses` | SELECT where `owner_user_id = auth.uid()` | Required for login |
+| `businesses` | UPDATE where `owner_user_id = auth.uid()` | Required for onboarding Step 1 |
+| `services` | SELECT/INSERT scoped via businesses.owner_user_id | Required for onboarding Step 2 |
+| `staff` | SELECT/INSERT scoped via businesses.owner_user_id | Required for onboarding Step 3 |
+| `availability_windows` | INSERT scoped via businesses.owner_user_id | Required for onboarding Step 3 |
+| `onboarding_state` | UPDATE/INSERT scoped via businesses.owner_user_id | Required for onboarding completion |
 
 ---
 

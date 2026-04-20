@@ -80,28 +80,25 @@ function getVapiConfig(business, language) {
               }
             },
             required: ['customer_phone', 'service_type', 'appointment_time', 'business_id']
-          },
-          server: {
-            url: 'https://operis-backend-production-3533.up.railway.app/booking'
           }
+        },
+        server: {
+          url: 'https://operis-backend-production-3533.up.railway.app/booking'
         }
       }
     ]
   };
 
-  const voice = isThai
-    ? {
-        provider:  'cartesia',
-        voiceId:   process.env.CARTESIA_VOICE_TH,
-        model:     'sonic-multilingual',
-        language:  'th'
-      }
-    : {
-        provider:  'cartesia',
-        voiceId:   process.env.CARTESIA_VOICE_EN,
-        model:     'sonic-multilingual',
-        language:  'en'
-      };
+  const voiceId = isThai
+    ? (process.env.CARTESIA_VOICE_TH || 'a167e0f3-df7e-4277-a60e-29b564582e75')
+    : (process.env.CARTESIA_VOICE_EN || '79a125e8-cd45-4c13-8a67-188112f4dd22');
+
+  const voice = {
+    provider:  'cartesia',
+    voiceId:   voiceId,
+    model:     'sonic-multilingual',
+    language:  isThai ? 'th' : 'en'
+  };
 
   const firstMessage = persona.greeting
     ?? (isThai

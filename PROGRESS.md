@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Layers 1–4, 7, 8, 9, 10 complete. Layer 5 (Twilio) partial — smsService.js built and wired, credentials not yet added to Railway. Backend fully deployed on Railway. Saturday door-to-door demos planned in Nonthaburi. Frontend (provision.html, dashboard.html, index.html) being built by partner. Phase 2 begins after demos confirm demand.
+Layers 1–4, 7, 8, 9, 10, 20 complete. Layer 5 (Twilio) partial — smsService.js built and wired, credentials not yet added to Railway. Backend fully deployed on Railway. Phase 2 complete — login system, scoped dashboard, onboarding wizard, and provision tool all built. Frontend pages: login.html, dashboard.html, onboarding.html, provision.html. RLS policies not yet applied in Supabase — required before frontend auth works.
 
 ---
 
@@ -35,6 +35,14 @@ Layers 1–4, 7, 8, 9, 10 complete. Layer 5 (Twilio) partial — smsService.js b
 - [x] `POST /booking` inserts confirmation + 24h + 1h reminder rows; skips 24h/1h if already in the past
 - [x] `POST /call/vapi-callback` fixed session lookup bug (was matching on vapi_call_id never set at insert time — now matches by caller_number + ended_at IS NULL)
 - [x] `twilio@^5.13.1` installed
+- [x] `login.html` — owner login via Supabase Auth (email + password)
+- [x] `dashboard.html` — scoped per business via auth session, dynamic shop name, logout button
+- [x] `dashboard.html` — redirects to login if no session, redirects to onboarding if services or hours missing
+- [x] `onboarding.html` — 3-step wizard: shop name → services → opening hours
+- [x] Onboarding: duplicate service name prevention, Step 3 recovery, onboarding_state upsert
+- [x] `provision.html` — internal mobile tool (black/white/orange theme) to create business + AI receptionist
+- [x] `POST /provision` endpoint — creates business row + calls provisionBusiness() in one step
+- [x] `provisionOrchestrator.js` — fixed Vapi tool config (server moved outside function), voiceId fallback to prevent undefined
 
 ---
 
@@ -111,7 +119,21 @@ Layers 1–4, 7, 8, 9, 10 complete. Layer 5 (Twilio) partial — smsService.js b
 - [x] If no booking: sends Thai SMS to caller with business callback number
 - [x] Fire-and-forget — never blocks callback response
 
-### Layers 11–20
+### Dashboard Frontend (Layer 20)
+- [x] `login.html` — Supabase Auth login, auto-redirect if session exists
+- [x] `dashboard.html` — auth-guarded, fetches business by owner_user_id, dynamic shop name, logout
+- [x] `dashboard.html` — onboarding redirect if services or availability_windows count is zero
+- [x] `onboarding.html` — Step 1: confirm/edit shop name, updates businesses table
+- [x] `onboarding.html` — Step 2: add services (name/duration/price), duplicate name check, batch insert to services table
+- [x] `onboarding.html` — Step 3: 7-day hours grid with toggles, auto-creates staff row (solopreneur), inserts availability_windows
+- [x] `onboarding.html` — Step 3 recovery: resumes at Step 3 if services exist but hours don't
+- [x] `onboarding.html` — onboarding_state upsert (handles missing row)
+- [x] `provision.html` — internal founder tool, black/white/orange theme, creates business + Vapi agent
+- [x] `POST /provision` — provisionController.js + provision.js route, creates business row then calls provisionBusiness()
+- [ ] RLS policies not yet applied in Supabase — auth/onboarding won't work until run
+- [ ] `businesses.owner_user_id` column not yet added — required for login
+
+### Layers 11–19
 - [ ] Not built
 
 ---
@@ -128,7 +150,9 @@ Layers 1–4, 7, 8, 9, 10 complete. Layer 5 (Twilio) partial — smsService.js b
 | CARTESIA_VOICE_TH / EN not set | Need Cartesia voice IDs added to Railway |
 | DEMO_VAPI_AGENT_ID not set | Need a pre-created Vapi agent ID added to Railway |
 | DEMO_TWILIO_NUMBER not set | Need demo Twilio number added to Railway |
-| Frontend not built | provision.html, dashboard.html, index.html — being built by partner |
+| RLS policies not applied | Auth, onboarding, and dashboard won't work until RLS policies are run in Supabase |
+| `businesses.owner_user_id` not added | Column + unique constraint needed in Supabase for login system |
+| `onboarding_state.business_id` unique constraint | Needed for upsert in onboarding Step 3 |
 
 ---
 
@@ -308,6 +332,46 @@ Layers 1–4, 7, 8, 9, 10 complete. Layer 5 (Twilio) partial — smsService.js b
 - Read all backend files — discovered demoController.js, demoRoutes, provisionOrchestrator.js, onboardingController.js not reflected in docs
 - Updated CONTEXT.md: added Cartesia to stack, added demo routes to file structure and endpoints table, corrected architecture decisions (phone_numbers routing, TwiML redirect, demo mode, source constraint, soft-fail RPC), added new env vars (CARTESIA_VOICE_TH/EN, DEMO_VAPI_AGENT_ID, DEMO_TWILIO_NUMBER), updated env var status table
 - PROGRESS.md: confirmed already up to date from Session 7
+
+**No code was changed.**
+
+---
+
+### Session 10 — 2026-04-09
+
+**Goal:** Phase 2 — Login system, scoped dashboard, onboarding wizard.
+
+**Completed:**
+- Created `login.html` — Supabase Auth login (email + password), auto-redirect if session exists, localised error messages
+- Updated `dashboard.html` — removed hardcoded BUSINESS_ID and "Test Barbershop"; fetches business by `owner_user_id` from session; added logout button; redirects to login.html if no session
+- Created `onboarding.html` — 3-step wizard (shop name → services → hours); same dark green/gold theme
+- Updated `dashboard.html` — redirects to onboarding.html if services or availability_windows count is zero
+- Fixed 3 edge cases in onboarding: duplicate service name prevention (case-insensitive), Step 3 recovery (resumes at hours if services exist but hours don't), onboarding_state upsert for missing rows
+
+**Requires Supabase setup:** `businesses.owner_user_id` column, RLS policies on businesses/services/staff/availability_windows/onboarding_state, auth user creation + linking.
+
+---
+
+### Session 11 — 2026-04-10
+
+**Goal:** Build provision.html and POST /provision endpoint.
+
+**Completed:**
+- Created `provision.html` — mobile-first internal tool, black/white/orange theme, form with business name + phone + language toggle, loading state, success state with phone display + Copy + Call Now buttons
+- Created `backend/controllers/provisionController.js` — validates input, creates business row in Supabase, calls provisionBusiness() with ownerPhone as phone number (TODO: replace with Twilio number pool)
+- Created `backend/routes/provision.js` — POST / route
+- Updated `server.js` — imported and mounted /provision routes
+- Fixed `provisionOrchestrator.js` — moved `server` property from inside `function` to tool top level (Vapi validation error); added voiceId fallback strings so it's never undefined
+
+---
+
+### Session 12 — 2026-04-18
+
+**Goal:** Update CONTEXT.md and PROGRESS.md with all Phase 2 work.
+
+**Completed:**
+- Updated CONTEXT.md: file structure (added login.html, dashboard.html, onboarding.html, provision.html, provisionController.js, provision.js route), endpoints table (added POST /provision), architecture decisions (owner login, onboarding detection, provision tool), Layer 20 status → DONE, RLS policies section
+- Updated PROGRESS.md: current status, built list, feature checklist (added Layer 20 section), missing/broken table, session log (sessions 10, 11, 12)
 
 **No code was changed.**
 
