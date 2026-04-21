@@ -32,14 +32,19 @@ async function provisionNew(req, res) {
     if (bizErr) throw new OperisError(bizErr.message, 'DB_ERROR', 500);
 
     // 2. Provision Vapi agent + phone_numbers row
-    const phoneNumber = ownerPhone;
-    // TODO: replace ownerPhone with an allocated Twilio number from the number pool before going to production.
+    // TODO: replace with number pool allocation before going to production.
+    const twilioNumber = process.env.TWILIO_PHONE_NUMBER;
+    if (!twilioNumber) throw new OperisError('No Twilio number configured', 'CONFIG_ERROR', 500);
 
     const result = await provisionBusiness({
       businessId:  business.id,
-      phoneNumber,
+      phoneNumber: twilioNumber,
       language
     });
+
+    // Include both numbers in the response
+    result.twilio_number = twilioNumber;
+    result.owner_phone   = ownerPhone;
 
     return res.status(201).json(result);
   } catch (err) {

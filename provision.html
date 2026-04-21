@@ -404,7 +404,7 @@
           throw new Error(data.error || data.message || 'Server error ' + res.status);
         }
 
-        const phone = data.phone_number || ownerPhone;
+        const phone = data.twilio_number || data.phone_number;
         document.getElementById('phone-display').textContent = phone;
         document.getElementById('call-btn').href = 'tel:' + phone;
 
