@@ -89,25 +89,13 @@ function getVapiConfig(business, language) {
     ]
   };
 
-  // Use Cartesia if credentials are set, otherwise fall back to Vapi's built-in PlayHT voices
-  let voice;
-  const cartesiaId = isThai ? process.env.CARTESIA_VOICE_TH : process.env.CARTESIA_VOICE_EN;
-
-  if (cartesiaId) {
-    voice = {
-      provider:  'cartesia',
-      voiceId:   cartesiaId,
-      model:     'sonic-multilingual',
-      language:  isThai ? 'th' : 'en'
-    };
-  } else {
-    voice = {
-      provider:  'playht',
-      voiceId:   isThai
-        ? 's3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json'
-        : 's3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json'
-    };
-  }
+  // Thai: Cartesia voice. English: same voice (multilingual) until a dedicated EN voice is added.
+  const voice = {
+    provider:  'cartesia',
+    voiceId:   process.env.CARTESIA_VOICE_TH || 'ccc7bb22-dcd0-42e4-822e-0731b950972f',
+    model:     'sonic-multilingual',
+    language:  isThai ? 'th' : 'en'
+  };
 
   const firstMessage = persona.greeting
     ?? (isThai
