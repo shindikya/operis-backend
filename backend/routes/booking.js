@@ -5,7 +5,8 @@ const {
   confirmBooking,
   getBooking,
   listBookings,
-  cancelBooking
+  cancelBooking,
+  markDepositPaid
 } = require('../controllers/bookingController');
 const { requireSupabaseAuth, requireBookingAuth } = require('../middleware/auth');
 
@@ -16,9 +17,14 @@ router.post('/', requireBookingAuth(), createBooking);
 // or by the owner's UI. Same auth surface as POST /.
 router.patch('/:id/confirm', requireBookingAuth(), confirmBooking);
 
-// All read/cancel routes are owner-scoped (Supabase JWT only)
+// Cancel is callable by both owner UI and AI. The controller enforces the
+// cancellation window when auth_source !== 'supabase'.
+router.patch('/:id/cancel', requireBookingAuth(), cancelBooking);
+
+// Deposit-paid toggle: owner-only.
+router.patch('/:id/deposit-paid', requireSupabaseAuth(), markDepositPaid);
+
 router.get('/business/:business_id', requireSupabaseAuth(), listBookings);
 router.get('/:id',                    requireSupabaseAuth(), getBooking);
-router.patch('/:id/cancel',           requireSupabaseAuth(), cancelBooking);
 
 module.exports = router;

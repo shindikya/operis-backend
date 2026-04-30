@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { OperisError } = require('../utils/errorHandler');
+const { upcomingHolidaysPromptBlock } = require('../config/thaiHolidays');
 
 // Thin wrapper around the Vapi REST API
 async function vapiRequest(method, path, body) {
@@ -78,6 +79,17 @@ function getVapiConfig(business, language, context = {}) {
                 type:        'string',
                 description: 'Business identifier — set automatically',
                 default:     business.id
+              },
+              intake_answers: {
+                type:        'array',
+                description: 'Answers to the intake_questions block, in the order they were listed. Each item: { question: string, answer: string }. Omit if no intake questions are configured.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    question: { type: 'string' },
+                    answer:   { type: 'string' }
+                  }
+                }
               }
             },
             required: ['customer_phone', 'service_type', 'appointment_time', 'business_id']
@@ -159,6 +171,11 @@ function buildSystemPrompt(business, language, context = {}) {
   const timezone = business.timezone ?? (language === 'th' ? 'Asia/Bangkok' : 'UTC');
   const servicesBlock = formatServices(services, language);
   const hoursBlock = formatHours(hours, language);
+  const holidaysBlock = upcomingHolidaysPromptBlock(language, 90);
+  const cancelWindow  = business.cancellation_window_hours ?? 24;
+  const cancelPolicy  = business.cancellation_policy_text;
+  // intake_questions: array of { question, type: 'yes_no' | 'short_answer' }
+  const intakeQs = Array.isArray(business.intake_questions) ? business.intake_questions : [];
 
   if (language === 'th') {
     const aiName = persona.ai_name ?? 'ผู้ช่วย';
@@ -184,6 +201,42 @@ function buildSystemPrompt(business, language, context = {}) {
     if (hoursBlock) {
       sections.push('# เวลาทำการ', hoursBlock, '');
     }
+
+    if (holidaysBlock) {
+      sections.push(
+        '# วันหยุดราชการ (ปิด)',
+        'ห้ามรับจองในวันต่อไปนี้ ถ้าลูกค้าขอจองในวันเหล่านี้ ให้แจ้งว่าเป็นวันหยุดและเสนอวันถัดไป:',
+        holidaysBlock,
+        ''
+      );
+    }
+
+    sections.push(
+      '# นโยบายการยกเลิก',
+      cancelPolicy
+        ? cancelPolicy
+        : `ลูกค้าต้องยกเลิกล่วงหน้าอย่างน้อย ${cancelWindow} ชั่วโมงก่อนเวลานัด`,
+      `ถ้าลูกค้าโทรมาขอยกเลิกภายใน ${cancelWindow} ชั่วโมงก่อนเวลานัด ห้ามยกเลิกอัตโนมัติ ให้แจ้งว่าอยู่ในช่วงห้ามยกเลิก ขอชื่อและเหตุผล แล้วบอกว่าจะแจ้งเจ้าของให้ติดต่อกลับ`,
+      ''
+    );
+
+    if (intakeQs.length > 0) {
+      sections.push(
+        '# คำถามรับข้อมูลลูกค้า',
+        'หลังจากยืนยันเวลานัดและก่อนเรียก create_booking ให้ถามคำถามต่อไปนี้ตามลำดับ บันทึกคำตอบสั้นๆ และส่งทั้งหมดเป็น intake_answers ใน create_booking:',
+        intakeQs.map((q, i) => `${i + 1}. ${q.question}`).join('\n'),
+        ''
+      );
+    }
+
+    // Caller-specific note (set per-call by /call/inbound via Vapi
+    // assistantOverrides.variableValues.client_notes). Empty for new callers.
+    sections.push(
+      '# โน้ตเกี่ยวกับลูกค้าคนนี้ (จากเจ้าของ)',
+      'ถ้ามีโน้ตด้านล่าง ให้ใช้ปรับการสนทนาเช่น เสนอเวลาที่ลูกค้าชอบ หลีกเลี่ยงเรื่องที่ลูกค้าไม่ชอบ:',
+      '{{client_notes}}',
+      ''
+    );
 
     sections.push(
       '# ขั้นตอนการจอง',
@@ -243,6 +296,42 @@ function buildSystemPrompt(business, language, context = {}) {
     sections.push('# Opening hours', hoursBlock, '');
   }
 
+  if (holidaysBlock) {
+    sections.push(
+      '# Public holidays (closed)',
+      'Do NOT take bookings on these dates. If a caller requests one of these days, explain it is a public holiday and offer the next available day:',
+      holidaysBlock,
+      ''
+    );
+  }
+
+  sections.push(
+    '# Cancellation policy',
+    cancelPolicy
+      ? cancelPolicy
+      : `Cancellations require at least ${cancelWindow} hours notice before the appointment.`,
+    `If a caller asks to cancel within ${cancelWindow} hours of the appointment, do NOT auto-cancel. Tell them it is within the no-cancellation window, take their name and reason, and say you will flag it for the owner to follow up.`,
+    ''
+  );
+
+  if (intakeQs.length > 0) {
+    sections.push(
+      '# Intake questions',
+      'After confirming the slot but BEFORE calling create_booking, ask each of these questions in order. Capture short answers and pass them all in the intake_answers array of create_booking:',
+      intakeQs.map((q, i) => `${i + 1}. ${q.question}`).join('\n'),
+      ''
+    );
+  }
+
+  // Owner-authored note about the caller, injected via Vapi
+  // assistantOverrides.variableValues.client_notes at call start.
+  sections.push(
+    "# Note about this caller (from the owner)",
+    'If the note below is non-empty, use it to personalise the call — e.g. prefer the times they like, avoid topics they dislike, refer to past visits:',
+    '{{client_notes}}',
+    ''
+  );
+
   sections.push(
     '# Booking flow',
     '1. Ask which service they want (only offer services from the list above).',
@@ -280,7 +369,7 @@ async function provisionBusiness({ businessId, phoneNumber, language = 'th' }) {
   // 1. Load business from Supabase
   const { data: business, error: bizError } = await supabase
     .from('businesses')
-    .select('id, name, owner_name, profession, timezone, persona_config')
+    .select('id, name, owner_name, profession, timezone, persona_config, cancellation_window_hours, cancellation_policy_text, intake_questions')
     .eq('id', businessId)
     .single();
 

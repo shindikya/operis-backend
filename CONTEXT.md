@@ -187,7 +187,8 @@ operis-backend/
 | POST | `/booking` | Create booking — validates, upserts client, inserts booking, queues reminders, SMS owner |
 | GET | `/booking/:id` | Get booking with client/service/staff joins |
 | GET | `/booking/business/:business_id` | List bookings with status/from/to/limit filters |
-| PATCH | `/booking/:id/cancel` | Cancel booking and pending reminders |
+| PATCH | `/booking/:id/cancel` | Cancel booking. Enforces `cancellation_window_hours` for non-owner callers — flags for owner review if within window |
+| PATCH | `/booking/:id/deposit-paid` | Owner-only. Flips a deposit_pending booking to confirmed, fires confirmed side-effects |
 | GET | `/availability` | Generate available slots from staff schedules |
 | POST | `/call/inbound` | Twilio webhook — looks up number, logs session, returns TwiML |
 | POST | `/call/vapi-callback` | Vapi end-of-call webhook — updates call_session, sends missed call recovery SMS if no booking |
@@ -195,6 +196,7 @@ operis-backend/
 | POST | `/provision` | Create business row + provision Vapi agent + phone_numbers row in one step (used by provision.html) |
 | GET | `/demo` | Mobile HTML demo setup page |
 | POST | `/demo/setup` | Patch shared demo Vapi agent with shop name + language |
+| POST | `/webhooks/line` | LINE Official Account webhook — scaffold; logs payload, detects booking-intent keywords, replies with placeholder. See LINE_INTEGRATION.md |
 
 ---
 
@@ -217,6 +219,13 @@ operis-backend/
 - **Owner login** — Supabase Auth (email + password); `businesses.owner_user_id` links auth user to their business; all dashboard queries scoped via session
 - **Onboarding detection** — dashboard checks for services + availability_windows; redirects to onboarding wizard if either is missing
 - **Provision tool** — `POST /provision` creates business row + Vapi agent in one call; `provision.html` is an internal mobile tool for the founder
+- **Operating hours dual-write** — onboarding wizard writes hours to BOTH `availability_windows` (for slot generation) AND `businesses.operating_hours` JSONB (for after-hours attribution). Single user action, two stores, derived from the same form
+- **Thai public holidays** — hardcoded list in `backend/config/thaiHolidays.js`. AI prompt lists upcoming 90-day holidays; `bookingController.createBooking` blocks on holiday dates with a 409 `HOLIDAY_CLOSED` error. Update yearly
+- **Cancellation window** — `businesses.cancellation_window_hours` (default 24). Owner UI cancels always succeed. AI/Vapi cancels within the window are refused with 409 `CANCEL_WINDOW_EXPIRED` and the booking is set `flagged_for_owner = true`. Confirmation SMS includes the policy text
+- **Deposit-pending flow** — first-time caller + service price ≥ `businesses.deposit_threshold_thb` (default ฿1,500) + `businesses.promptpay_id` set → booking inserts as `deposit_pending`. PromptPay QR PNG generated via `backend/services/promptpayService.js` (EMVCo + CRC-16/CCITT-FALSE), uploaded to Supabase Storage bucket `promptpay-qr`, link sent in customer SMS. Owner marks paid via dashboard → `PATCH /booking/:id/deposit-paid` flips status to confirmed and fires regular side-effects
+- **Intake questions** — owner configures up to 3 in `services.html`. AI asks them after slot confirmation, before `create_booking`. Stored on `bookings.intake_answers` JSONB. Surfaced inline on booking cards in dashboard
+- **Owner notes per client** — reuses `clients.notes`. Owner sets/edits via the dashboard booking card. AI prompt includes `{{client_notes}}` placeholder; `/call/inbound` passes the note via Vapi `assistantOverrides.variableValues` so the AI personalises returning calls
+- **LINE webhook** — `/webhooks/line` is a scaffold that signs payloads, detects booking-intent keywords, replies with a placeholder. Full booking flow not built — see `LINE_INTEGRATION.md`
 
 ---
 
@@ -250,6 +259,19 @@ operis-backend/
 | Table | Column | Purpose |
 |---|---|---|
 | `businesses` | `owner_user_id` (uuid, FK → auth.users, UNIQUE) | Links Supabase Auth user to their business |
+| `businesses` | `operating_hours` (JSONB) | `{ mon: {open, close}, ... }`. Used by attribution + AI prompt |
+| `businesses` | `average_booking_value` (NUMERIC) | THB fallback for booking value when service price unknown |
+| `businesses` | `cancellation_window_hours` (INTEGER, default 24) | Hours before start_time during which AI cannot auto-cancel |
+| `businesses` | `cancellation_policy_text` (TEXT) | Optional override for default policy text in SMS + prompt |
+| `businesses` | `promptpay_id` (TEXT) | Phone or 13-digit national ID for QR generation |
+| `businesses` | `deposit_threshold_thb` (INTEGER, default 1500) | Trigger value for first-time-caller deposit flow |
+| `businesses` | `intake_questions` (JSONB, default `[]`) | Up to 3 owner-configured questions the AI asks before booking |
+| `bookings` | `intake_answers` (JSONB, default `[]`) | `[{ question, answer }, ...]` recorded by the AI at booking time |
+| `bookings` | `deposit_paid_at` (TIMESTAMPTZ) | Set when owner clicks "Mark deposit paid" |
+| `bookings` | `flagged_for_owner` (BOOLEAN, default FALSE) | Set when AI tries to cancel within the window |
+| `bookings` | `flag_reason` (TEXT) | Free-text reason explaining the flag |
+| `call_sessions` | `was_after_hours`, `was_concurrent`, `outcome`, `booking_value`, `end_reason`, `recovery_sms_sent` | Attribution dashboard fields |
+| `monthly_summaries` | (table) | Per-business per-month rollup of attribution metrics |
 
 ### RLS Policies Required
 

@@ -514,6 +514,7 @@
       <span class="shop-name" id="shop-name">–</span>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="header-badge">OPERIS</span>
+        <a class="logout-btn" href="services.html" style="text-decoration:none">บริการ</a>
         <button class="logout-btn" id="logout-btn">ออกจากระบบ</button>
       </div>
     </div>
@@ -629,10 +630,12 @@
 
     function statusLabel(status) {
       const map = {
-        confirmed: { th: 'ยืนยัน',    en: 'Confirmed',  cls: 'status-confirmed' },
-        cancelled: { th: 'ยกเลิก',    en: 'Cancelled',  cls: 'status-cancelled' },
-        completed: { th: 'เสร็จสิ้น', en: 'Completed',  cls: 'status-completed' },
-        no_show:   { th: 'ไม่มา',     en: 'No-show',    cls: 'status-cancelled' },
+        confirmed:       { th: 'ยืนยัน',     en: 'Confirmed',     cls: 'status-confirmed' },
+        cancelled:       { th: 'ยกเลิก',     en: 'Cancelled',     cls: 'status-cancelled' },
+        completed:       { th: 'เสร็จสิ้น',   en: 'Completed',     cls: 'status-completed' },
+        no_show:         { th: 'ไม่มา',      en: 'No-show',       cls: 'status-cancelled' },
+        deposit_pending: { th: 'รอมัดจำ',    en: 'Deposit pending', cls: 'status-completed' },
+        pending:         { th: 'รอยืนยัน',   en: 'Pending',       cls: 'status-completed' },
       };
       return map[status] || { th: status, en: status, cls: 'status-confirmed' };
     }
@@ -695,14 +698,32 @@
         const endFmt    = b.end_time ? formatTime(b.end_time) : '';
         const timeRange = endFmt ? `${startFmt} – ${endFmt}` : startFmt;
         const dateFmt   = formatDate(b.start_time);
-        const svc       = b.services ? b.services.name : 'ไม่ระบุบริการ';
+        // SECURITY (round 3 H1): client.name reaches us through the Vapi
+        // tool-call path where the caller's spoken name is passed verbatim.
+        // Service names are owner-set but still echoed into innerHTML, so
+        // escape both rather than trust the upstream layer.
+        const svc       = escapeHtml(b.services ? b.services.name : 'ไม่ระบุบริการ');
         const phone     = b.clients  ? b.clients.phone : '–';
-        const clientName = b.clients && b.clients.name ? b.clients.name : 'ลูกค้า';
+        const clientName = escapeHtml(b.clients && b.clients.name ? b.clients.name : 'ลูกค้า');
         const st        = statusLabel(b.status);
 
+        // Phone is server-validated as E.164 (^\+[1-9]\d{7,14}$), but escape
+        // defensively in case validation ever loosens.
+        const safePhone    = escapeHtml(phone);
         const phoneDisplay = phone !== '–'
-          ? `<a href="tel:${phone}">${phone}</a>`
+          ? `<a href="tel:${safePhone}">${safePhone}</a>`
           : '–';
+
+        const depositRow = b.status === 'deposit_pending'
+          ? `<div style="margin-top:10px"><button class="logout-btn" data-mark-paid="${b.id}" style="width:100%;color:var(--gold);border-color:var(--gold-dim)">✓ ลูกค้าจ่ายแล้ว / Mark deposit paid</button></div>`
+          : '';
+
+        const answers = Array.isArray(b.intake_answers) ? b.intake_answers : [];
+        const intakeRow = answers.length === 0 ? '' : `
+          <div class="card-divider"></div>
+          <div style="font-size:12px;color:var(--cream-dim)">
+            ${answers.map(a => `<div><b style="color:var(--cream)">Q:</b> ${escapeHtml(a.question)} <b style="color:var(--cream)">→</b> ${escapeHtml(a.answer)}</div>`).join('')}
+          </div>`;
 
         html += `
           <div class="card">
@@ -725,11 +746,15 @@
               <div class="card-detail">
                 <span class="detail-icon">📞</span>
                 <div>
-                  <div class="detail-text">${phoneDisplay}</div>
-                  <div class="service-sub">${clientName}</div>
+                  <div class="detail-text">${phoneDisplay}
+                    ${b.clients?.id ? `<button class="logout-btn" data-edit-note="${b.clients.id}" data-existing-note="${escapeHtml(b.clients?.notes || '')}" style="margin-left:6px;padding:1px 8px;font-size:10px">โน้ต / Note</button>` : ''}
+                  </div>
+                  <div class="service-sub">${clientName}${b.clients?.notes ? ` · ${escapeHtml(b.clients.notes.slice(0, 40))}${b.clients.notes.length > 40 ? '…' : ''}` : ''}</div>
                 </div>
               </div>
             </div>
+            ${intakeRow}
+            ${depositRow}
           </div>`;
       });
 
@@ -743,10 +768,13 @@
 
     function renderError(msg) {
       const content = document.getElementById('content');
+      // SECURITY (round 3 H1): msg may include server-side error text that is
+      // not under our control (Supabase JS client surfaces raw Postgres errors
+      // verbatim). Escape before injection.
       content.innerHTML = `
         <div class="error-state">
           <div class="error-title">โหลดข้อมูลไม่ได้ / Failed to load</div>
-          <div class="error-sub">${msg}</div>
+          <div class="error-sub">${escapeHtml(msg || '')}</div>
         </div>
         ${refreshHTML()}
       `;
@@ -773,6 +801,48 @@
           loadAttribution();
         });
       }
+
+      // Edit-client-note handlers — per-client note that the AI receptionist
+      // reads at the start of returning calls (via {{client_notes}}).
+      document.querySelectorAll('[data-edit-note]').forEach(b => {
+        b.addEventListener('click', async () => {
+          const clientId = b.dataset.editNote;
+          const current  = b.dataset.existingNote || '';
+          const next = prompt('โน้ตเกี่ยวกับลูกค้าคนนี้ / Note about this client (AI will use this on next call):', current);
+          if (next === null) return;
+          const { error } = await supabase
+            .from('clients')
+            .update({ notes: next.trim() })
+            .eq('id', clientId);
+          if (error) { alert(error.message); return; }
+          loadBookings();
+        });
+      });
+
+      // Mark-deposit-paid handlers (one per pending booking card)
+      document.querySelectorAll('[data-mark-paid]').forEach(b => {
+        b.addEventListener('click', async () => {
+          const id = b.dataset.markPaid;
+          if (!confirm('Confirm: deposit received for this booking?')) return;
+          b.disabled = true;
+          b.textContent = 'Saving…';
+          const { data: { session } } = await supabase.auth.getSession();
+          const res = await fetch(`https://operis-backend-production-3533.up.railway.app/booking/${id}/deposit-paid`, {
+            method:  'PATCH',
+            headers: {
+              'Content-Type':  'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          });
+          if (!res.ok) {
+            b.disabled = false;
+            b.textContent = '✓ ลูกค้าจ่ายแล้ว / Mark deposit paid';
+            alert('Failed to mark paid');
+            return;
+          }
+          loadBookings();
+        });
+      });
     }
 
     // ── Revenue Attribution ──────────────────────────────────────────────────
@@ -980,11 +1050,12 @@
           start_time,
           end_time,
           status,
-          clients ( name, phone ),
+          intake_answers,
+          clients ( id, name, phone, notes ),
           services ( name )
         `)
         .eq('business_id', businessId)
-        .in('status', ['confirmed'])
+        .in('status', ['confirmed', 'deposit_pending'])
         .gte('start_time', nowISO)
         .order('start_time', { ascending: true })
         .limit(30);

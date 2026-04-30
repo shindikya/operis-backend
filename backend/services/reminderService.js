@@ -18,7 +18,7 @@ async function processReminders() {
         start_time,
         clients ( name, phone ),
         services ( name ),
-        businesses ( name )
+        businesses ( name, cancellation_window_hours, cancellation_policy_text )
       )
     `)
     .eq('status', 'pending')
@@ -50,9 +50,15 @@ async function processReminders() {
     const svcName = service?.name ?? 'บริการ';
     const bizName = biz?.name ?? '';
 
+    // Cancellation policy line — included in confirmation SMS only.
+    // Falls back to a sensible default built from cancellation_window_hours.
+    const cancelWindow = biz?.cancellation_window_hours ?? 24;
+    const cancelText = biz?.cancellation_policy_text
+      ?? `ยกเลิกนัดล่วงหน้าอย่างน้อย ${cancelWindow} ชั่วโมง`;
+
     let msg;
     if (reminder.type === 'confirmation') {
-      msg = `ยืนยันนัดหมาย: ${svcName} เวลา ${time} ที่ ${bizName} ขอบคุณครับ`;
+      msg = `ยืนยันนัดหมาย: ${svcName} เวลา ${time} ที่ ${bizName}\n${cancelText}\nขอบคุณครับ`;
     } else if (reminder.type === 'reminder_24h') {
       msg = `เตือนความจำ: คุณมีนัด ${svcName} พรุ่งนี้ เวลา ${time} ที่ ${bizName}`;
     } else if (reminder.type === 'reminder_1h') {

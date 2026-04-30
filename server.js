@@ -11,6 +11,7 @@ const provisionRoutes = require('./backend/routes/provision');
 const demoRoutes = require('./backend/routes/demo');
 const dashboardRoutes = require('./backend/routes/dashboard');
 const callsApiRoutes = require('./backend/routes/calls');
+const lineRoutes = require('./backend/routes/line');
 const { startReminderCron } = require('./backend/services/reminderService');
 const { startWebhookRetryCron } = require('./backend/services/webhookRetryService');
 const { startBookingExpiryCron } = require('./backend/services/bookingExpiryService');
@@ -50,6 +51,7 @@ app.use('/provision', provisionRoutes);
 app.use('/demo', demoRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/calls', callsApiRoutes);
+app.use('/webhooks/line', lineRoutes);
 
 // Start server
 const PORT = process.env.PORT || 3000;

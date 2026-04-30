@@ -1,0 +1,403 @@
+<!--
+  Services management — owner-facing CRUD over the `services` table.
+  Direct Supabase client calls, RLS scoped via businesses.owner_user_id.
+  AI receptionist reads `services` dynamically when answering callers,
+  so changes here update the bot on next call without re-provisioning.
+-->
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Operis — Services</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    :root {
+      --green-dark:  #0F2318;
+      --green-deep:  #1B3A2A;
+      --green-card:  #1F3D2C;
+      --green-hover: #274D37;
+      --gold:        #D4A843;
+      --gold-light:  #E8C547;
+      --gold-dim:    #A07B2A;
+      --cream:       #F5F0E8;
+      --cream-dim:   #B8B0A0;
+      --red-soft:    #C0392B;
+      --radius:      12px;
+      --shadow:      0 2px 12px rgba(0,0,0,0.35);
+    }
+
+    html, body {
+      min-height: 100%;
+      background: var(--green-dark);
+      color: var(--cream);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .header {
+      background: var(--green-deep);
+      border-bottom: 2px solid var(--gold-dim);
+      padding: 16px;
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .header-title { font-size: 18px; font-weight: 700; color: var(--gold); }
+    .back-link {
+      color: var(--cream-dim); font-size: 13px; text-decoration: none;
+      border: 1px solid rgba(184,176,160,0.3); border-radius: 20px; padding: 4px 12px;
+    }
+
+    .wrap { max-width: 540px; margin: 0 auto; padding: 16px; }
+
+    .section-title {
+      font-size: 12px; font-weight: 600; color: var(--gold-dim);
+      letter-spacing: 0.8px; text-transform: uppercase; margin: 16px 4px 8px;
+    }
+
+    /* List */
+    .svc-list { display: flex; flex-direction: column; gap: 10px; }
+    .svc-card {
+      background: var(--green-card);
+      border: 1px solid rgba(212,168,67,0.18);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+    }
+    .svc-card.inactive { opacity: 0.5; }
+    .svc-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .svc-name { font-size: 16px; font-weight: 600; color: var(--cream); flex: 1; word-break: break-word; }
+    .svc-meta { font-size: 13px; color: var(--cream-dim); margin-top: 2px; }
+    .svc-actions { display: flex; gap: 6px; }
+    .icon-btn {
+      background: transparent; border: 1px solid rgba(184,176,160,0.3);
+      color: var(--cream-dim); border-radius: 8px; padding: 6px 10px;
+      cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600;
+    }
+    .icon-btn:active { background: rgba(184,176,160,0.1); }
+    .icon-btn.danger { color: #e07b6e; border-color: rgba(192,57,43,0.4); }
+    .icon-btn.toggle-on { color: var(--gold); border-color: var(--gold-dim); }
+
+    .empty {
+      text-align: center; padding: 32px 16px; color: var(--cream-dim);
+      background: var(--green-card);
+      border: 1px dashed rgba(212,168,67,0.25);
+      border-radius: var(--radius);
+    }
+
+    /* Form */
+    .form-card {
+      background: var(--green-card);
+      border: 1px solid rgba(212,168,67,0.18);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .form-group { margin-bottom: 14px; }
+    .form-row { display: flex; gap: 10px; }
+    .form-row .form-group { flex: 1; }
+    .form-label {
+      display: block; font-size: 11px; font-weight: 600; color: var(--cream-dim);
+      letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px;
+    }
+    .form-input, .form-select {
+      width: 100%; background: var(--green-deep);
+      border: 1.5px solid rgba(212,168,67,0.2); border-radius: 8px;
+      color: var(--cream); font-family: inherit; font-size: 15px;
+      padding: 11px 12px; outline: none; -webkit-appearance: none;
+    }
+    .form-input:focus, .form-select:focus { border-color: var(--gold-dim); }
+
+    .btn-primary {
+      width: 100%; background: var(--gold); border: none;
+      border-radius: var(--radius); color: var(--green-dark);
+      font-family: inherit; font-size: 15px; font-weight: 700;
+      padding: 13px; cursor: pointer; margin-top: 4px;
+    }
+    .btn-primary:active { background: var(--gold-light); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: transparent; border: 1.5px solid var(--gold-dim);
+      border-radius: 8px; color: var(--gold);
+      font-family: inherit; font-size: 13px; font-weight: 600;
+      padding: 8px 12px; cursor: pointer;
+    }
+
+    .error-msg {
+      display: none; background: rgba(192,57,43,0.15);
+      border: 1px solid rgba(192,57,43,0.35); border-radius: 8px;
+      color: #e07b6e; font-size: 13px; padding: 10px 14px;
+      margin-top: 12px; text-align: center;
+    }
+    .error-msg.visible { display: block; }
+
+    .loading { text-align: center; padding: 60px 16px; color: var(--cream-dim); }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid rgba(212,168,67,0.2);
+      border-top-color: var(--gold); border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block; margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <a class="back-link" href="dashboard.html">← Dashboard</a>
+    <span class="header-title">บริการ / Services</span>
+    <span style="width:84px"></span>
+  </div>
+
+  <div class="wrap">
+    <div id="content">
+      <div class="loading">
+        <div class="spinner"></div>
+        <div>กำลังโหลด… / Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    const SUPABASE_URL  = 'https://grzghjoughjqyguabaxx.supabase.co';
+    const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdyemdoam91Z2hqcXlndWFiYXh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5Njc5NzEsImV4cCI6MjA5MDU0Mzk3MX0.lIXBtNMhAQBVR-0uctE52ULzFcyegxPnKr3CAIpJLcU';
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    let businessId = null;
+    let services = [];
+    let intakeQs = []; // up to 3 owner-configured questions
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { window.location.href = 'login.html'; return; }
+
+      const { data: business, error } = await supabase
+        .from('businesses')
+        .select('id, intake_questions')
+        .eq('owner_user_id', session.user.id)
+        .single();
+      if (error || !business) { window.location.href = 'login.html'; return; }
+
+      businessId = business.id;
+      intakeQs = Array.isArray(business.intake_questions) ? business.intake_questions : [];
+      await loadServices();
+    }
+
+    async function loadServices() {
+      const { data, error } = await supabase
+        .from('services')
+        .select('id, name, duration_min, price_cents, currency, is_active')
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        document.getElementById('content').innerHTML =
+          `<div class="empty" style="border-color:rgba(192,57,43,0.35);color:#e07b6e">${esc(error.message)}</div>`;
+        return;
+      }
+
+      services = data || [];
+      render();
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
+    }
+
+    function render() {
+      const list = services.length === 0
+        ? `<div class="empty">ยังไม่มีบริการ — เพิ่มบริการแรกด้านล่าง<br><small>No services yet — add your first below</small></div>`
+        : `<div class="svc-list">${services.map(renderCard).join('')}</div>`;
+
+      const intakeRowsHtml = intakeQs.length === 0
+        ? '<div style="color:var(--cream-dim);font-size:13px;margin-bottom:8px">ยังไม่มีคำถาม / No intake questions</div>'
+        : intakeQs.map((q, i) => `
+            <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+              <input class="form-input" data-iq="${i}" value="${esc(q.question)}" />
+              <button class="icon-btn danger" data-iq-remove="${i}">×</button>
+            </div>`).join('');
+
+      document.getElementById('content').innerHTML = `
+        <div class="section-title">รายการบริการ / Active services</div>
+        ${list}
+        <div class="section-title">เพิ่มบริการ / Add a service</div>
+        <div class="form-card">
+          <div class="form-group">
+            <label class="form-label" for="svc-name">ชื่อบริการ / Service name</label>
+            <input class="form-input" type="text" id="svc-name" placeholder="เช่น ตัดผม / Haircut" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="svc-duration">ระยะเวลา / Duration</label>
+              <select class="form-select" id="svc-duration">
+                <option value="15">15 นาที</option>
+                <option value="30" selected>30 นาที</option>
+                <option value="45">45 นาที</option>
+                <option value="60">60 นาที</option>
+                <option value="90">90 นาที</option>
+                <option value="120">120 นาที</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="svc-price">ราคา / Price (฿)</label>
+              <input class="form-input" type="number" id="svc-price" placeholder="300" inputmode="numeric" min="0" />
+            </div>
+          </div>
+          <button class="btn-primary" id="btn-add">+ เพิ่มบริการ / Add service</button>
+          <div class="error-msg" id="err-add"></div>
+        </div>
+
+        <div class="section-title">คำถามรับข้อมูล / Intake questions (max 3)</div>
+        <div class="form-card">
+          <div style="font-size:12px;color:var(--cream-dim);margin-bottom:10px">
+            AI จะถามคำถามเหล่านี้หลังยืนยันเวลานัด / AI asks these after confirming the slot.
+          </div>
+          <div id="iq-list">${intakeRowsHtml}</div>
+          ${intakeQs.length < 3
+            ? `<button class="btn-secondary" id="btn-add-iq" style="margin-top:6px">+ เพิ่มคำถาม / Add question</button>`
+            : ''}
+          <button class="btn-primary" id="btn-save-iq" style="margin-top:10px">บันทึก / Save questions</button>
+          <div class="error-msg" id="err-iq"></div>
+        </div>
+      `;
+
+      // Attach handlers
+      document.getElementById('btn-add').addEventListener('click', addService);
+      document.querySelectorAll('[data-action]').forEach(el => {
+        el.addEventListener('click', handleAction);
+      });
+      const btnAddIq = document.getElementById('btn-add-iq');
+      if (btnAddIq) btnAddIq.addEventListener('click', () => {
+        if (intakeQs.length >= 3) return;
+        intakeQs.push({ question: '', type: 'short_answer' });
+        render();
+      });
+      document.getElementById('btn-save-iq').addEventListener('click', saveIntake);
+      document.querySelectorAll('[data-iq-remove]').forEach(b => {
+        b.addEventListener('click', () => {
+          intakeQs.splice(parseInt(b.dataset.iqRemove), 1);
+          render();
+        });
+      });
+    }
+
+    function renderCard(s) {
+      const price = (s.price_cents || 0) / 100;
+      const cur = (s.currency || 'thb').toUpperCase();
+      const inactiveCls = s.is_active ? '' : ' inactive';
+      const toggleLabel = s.is_active ? 'เปิด' : 'ปิด';
+      const toggleCls = s.is_active ? ' toggle-on' : '';
+
+      return `
+        <div class="svc-card${inactiveCls}">
+          <div class="svc-row">
+            <div style="flex:1;min-width:0">
+              <div class="svc-name">${esc(s.name)}</div>
+              <div class="svc-meta">${s.duration_min} นาที · ฿${price.toLocaleString()}</div>
+            </div>
+            <div class="svc-actions">
+              <button class="icon-btn${toggleCls}" data-action="toggle" data-id="${s.id}">${toggleLabel}</button>
+              <button class="icon-btn" data-action="edit" data-id="${s.id}">แก้</button>
+              <button class="icon-btn danger" data-action="delete" data-id="${s.id}">ลบ</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function addService() {
+      const errEl = document.getElementById('err-add');
+      errEl.classList.remove('visible');
+
+      const name     = document.getElementById('svc-name').value.trim();
+      const duration = parseInt(document.getElementById('svc-duration').value);
+      const price    = parseInt(document.getElementById('svc-price').value) || 0;
+
+      if (!name) { errEl.textContent = 'ใส่ชื่อบริการ / Service name required'; errEl.classList.add('visible'); return; }
+      if (price < 0) { errEl.textContent = 'ราคาต้องไม่ติดลบ / Price cannot be negative'; errEl.classList.add('visible'); return; }
+      if (services.some(s => s.name.toLowerCase() === name.toLowerCase())) {
+        errEl.textContent = 'บริการนี้มีอยู่แล้ว / Service already exists'; errEl.classList.add('visible'); return;
+      }
+
+      const btn = document.getElementById('btn-add');
+      btn.disabled = true;
+
+      const { error } = await supabase.from('services').insert({
+        business_id:  businessId,
+        name,
+        duration_min: duration,
+        price_cents:  price * 100,
+        currency:     'thb',
+        is_active:    true
+      });
+
+      btn.disabled = false;
+
+      if (error) {
+        errEl.textContent = error.message; errEl.classList.add('visible'); return;
+      }
+      await loadServices();
+    }
+
+    async function handleAction(e) {
+      const action = e.currentTarget.dataset.action;
+      const id     = e.currentTarget.dataset.id;
+      const svc    = services.find(s => s.id === id);
+      if (!svc) return;
+
+      if (action === 'toggle') {
+        await supabase.from('services').update({ is_active: !svc.is_active }).eq('id', id);
+        await loadServices();
+      } else if (action === 'delete') {
+        if (!confirm(`Delete "${svc.name}"? This cannot be undone.`)) return;
+        await supabase.from('services').delete().eq('id', id);
+        await loadServices();
+      } else if (action === 'edit') {
+        const newName = prompt('Service name', svc.name);
+        if (newName === null) return;
+        const newDur = prompt('Duration (minutes)', svc.duration_min);
+        if (newDur === null) return;
+        const newPrice = prompt('Price (THB)', (svc.price_cents || 0) / 100);
+        if (newPrice === null) return;
+
+        await supabase.from('services').update({
+          name:         newName.trim(),
+          duration_min: parseInt(newDur) || svc.duration_min,
+          price_cents:  Math.round(parseFloat(newPrice) * 100) || 0
+        }).eq('id', id);
+        await loadServices();
+      }
+    }
+
+    async function saveIntake() {
+      const errEl = document.getElementById('err-iq');
+      errEl.classList.remove('visible');
+      // Read live values from inputs back into intakeQs
+      document.querySelectorAll('[data-iq]').forEach(input => {
+        const i = parseInt(input.dataset.iq);
+        if (intakeQs[i]) intakeQs[i].question = input.value.trim();
+      });
+      const cleaned = intakeQs.filter(q => q.question.length > 0).slice(0, 3);
+
+      const { error } = await supabase
+        .from('businesses')
+        .update({ intake_questions: cleaned })
+        .eq('id', businessId);
+
+      if (error) {
+        errEl.textContent = error.message; errEl.classList.add('visible'); return;
+      }
+      intakeQs = cleaned;
+      render();
+    }
+
+    init();
+  </script>
+</body>
+</html>

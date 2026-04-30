@@ -2,7 +2,7 @@
 
 ## Current Status
 
-Layers 1–4, 7, 8, 9, 10, 20 complete. Layer 5 (Twilio) partial — smsService.js built and wired, credentials not yet added to Railway. Backend fully deployed on Railway. Phase 2 complete — login system, scoped dashboard, onboarding wizard, and provision tool all built. Frontend pages: login.html, dashboard.html, onboarding.html, provision.html. RLS policies not yet applied in Supabase — required before frontend auth works.
+Layers 1–4, 7, 8, 9, 10, 20 complete. Layer 5 (Twilio) partial — smsService.js built and wired, credentials not yet added to Railway. Backend fully deployed on Railway. Phase 3 complete — operating hours JSONB derivation, Thai public holidays, cancellation policy enforcement, services dashboard CRUD, PromptPay deposit flow, intake questions, owner notes per client, LINE webhook scaffold. Frontend pages: login.html, dashboard.html, onboarding.html, provision.html, services.html. Migrations: `migrations/20260430140000_phase3_features.sql` adds the new columns; pre-existing `20260429120000_revenue_attribution.sql` adds `operating_hours` + attribution columns. Both must be applied in Supabase before the new flows work.
 
 ---
 
@@ -43,6 +43,17 @@ Layers 1–4, 7, 8, 9, 10, 20 complete. Layer 5 (Twilio) partial — smsService.
 - [x] `provision.html` — internal mobile tool (black/white/orange theme) to create business + AI receptionist
 - [x] `POST /provision` endpoint — creates business row + calls provisionBusiness() in one step
 - [x] `provisionOrchestrator.js` — fixed Vapi tool config (server moved outside function), voiceId fallback to prevent undefined
+- [x] Phase 3 — operating hours dual-write (onboarding writes to `availability_windows` AND `businesses.operating_hours` JSONB)
+- [x] Phase 3 — `backend/config/thaiHolidays.js` with 2026 calendar, `lookupHoliday`, `bangkokDateStr`, `upcomingHolidaysPromptBlock`
+- [x] Phase 3 — AI prompt includes upcoming Thai holidays (next 90d), `bookingController.createBooking` blocks on holiday dates
+- [x] Phase 3 — `businesses.cancellation_window_hours` + `cancellation_policy_text` enforced in `cancelBooking`; AI prompt includes the policy; reminder confirmation SMS appends the policy text
+- [x] Phase 3 — `services.html` standalone CRUD page (active toggle, edit prompt, delete confirm, dup-name guard); link added to dashboard header
+- [x] Phase 3 — `backend/services/promptpayService.js` — EMVCo + CRC-16/CCITT-FALSE payload, `qrcode` PNG, Supabase Storage upload to `promptpay-qr` bucket, returns public URL
+- [x] Phase 3 — `bookingController.createBooking` flags first-time + price ≥ threshold + promptpay_id-set bookings as `deposit_pending`, sends customer + owner SMS with QR link
+- [x] Phase 3 — `PATCH /booking/:id/deposit-paid` (owner-only) flips status, fires confirmed side-effects; dashboard card shows "Mark deposit paid" button
+- [x] Phase 3 — `businesses.intake_questions` JSONB; AI prompt block instructs the agent; `create_booking` Vapi tool accepts `intake_answers` array; persisted to `bookings.intake_answers`; surfaced inline on dashboard cards; configurable in `services.html`
+- [x] Phase 3 — Owner notes per client reuse `clients.notes`; AI prompt includes `{{client_notes}}` placeholder; `/call/inbound` passes context via `assistantOverrides` (base64 query); dashboard inline edit on each booking card
+- [x] Phase 3 — `POST /webhooks/line` scaffold: HMAC-SHA256 signature verification, booking-intent keyword detection (Thai + English), placeholder reply via LINE reply API; `LINE_INTEGRATION.md` documents what's needed for full functionality
 
 ---
 
@@ -153,6 +164,10 @@ Layers 1–4, 7, 8, 9, 10, 20 complete. Layer 5 (Twilio) partial — smsService.
 | RLS policies not applied | Auth, onboarding, and dashboard won't work until RLS policies are run in Supabase |
 | `businesses.owner_user_id` not added | Column + unique constraint needed in Supabase for login system |
 | `onboarding_state.business_id` unique constraint | Needed for upsert in onboarding Step 3 |
+| Phase 3 migration not applied | `migrations/20260430140000_phase3_features.sql` must be run in Supabase |
+| Supabase Storage `promptpay-qr` bucket | Must be created (public read) for QR links to resolve |
+| Vapi `assistantOverrides` query format unverified | The base64-encoded `assistantOverrides` query param in `/call/inbound` follows the documented Vapi pattern but has not been live-tested. If Vapi rejects it, fall back to per-call assistant updates via REST or use Vapi's transient assistant API |
+| LINE phase 2 not built | Webhook accepts and replies but does not link to businesses, doesn't run the full booking flow. See LINE_INTEGRATION.md |
 
 ---
 
@@ -374,6 +389,33 @@ Layers 1–4, 7, 8, 9, 10, 20 complete. Layer 5 (Twilio) partial — smsService.
 - Updated PROGRESS.md: current status, built list, feature checklist (added Layer 20 section), missing/broken table, session log (sessions 10, 11, 12)
 
 **No code was changed.**
+
+---
+
+### Session 13 — 2026-04-30
+
+**Goal:** Phase 3 — operating hours, holidays, cancellation policy, services dashboard, PromptPay deposits, intake questions, owner notes per client, LINE webhook scaffold.
+
+**Completed:**
+- `onboarding.html` — Step 3 now derives and dual-writes `businesses.operating_hours` JSONB alongside `availability_windows`
+- `backend/config/thaiHolidays.js` — 2026 calendar + helpers (`lookupHoliday`, `bangkokDateStr`, `upcomingHolidaysPromptBlock`)
+- AI prompt (Thai + English) — adds upcoming holidays block, cancellation policy block, intake-questions block, and `{{client_notes}}` per-call placeholder
+- `bookingController.createBooking` — blocks holiday dates with 409 `HOLIDAY_CLOSED`; reads `intake_answers`; persists; flags first-time + price ≥ threshold + promptpay_id-set as `deposit_pending`; generates QR + sends customer/owner SMS with QR link
+- `bookingController.cancelBooking` — enforces cancellation window for non-owner cancels; flags booking instead with 409 `CANCEL_WINDOW_EXPIRED`
+- `bookingController.markDepositPaid` — new owner-only endpoint, flips deposit_pending → confirmed, fires confirmed side-effects
+- `routes/booking.js` — `cancel` now accepts AI auth; `deposit-paid` route added
+- `reminderService.js` — confirmation SMS now appends cancellation policy text
+- `services.html` — new owner CRUD page (services + intake questions config); link added to dashboard header
+- `dashboard.html` — surfaces deposit_pending status with "Mark deposit paid" button; shows intake answers inline; per-client owner-note edit on each card
+- `backend/services/promptpayService.js` — EMVCo payload builder + CRC-16/CCITT-FALSE + qrcode PNG render + Supabase Storage upload
+- `backend/controllers/lineController.js` + `routes/line.js` — LINE webhook scaffold with HMAC signature verification, booking-intent keyword detection, placeholder reply
+- `LINE_INTEGRATION.md` — documents what's needed for full LINE booking
+- `migrations/20260430140000_phase3_features.sql` — adds 9 new columns + 1 index + loosens bookings_status_check
+- `package.json` — adds `qrcode` dependency
+
+**Requires Supabase setup:** apply Phase 3 migration, create `promptpay-qr` Storage bucket (public read), apply RLS policies for the new columns.
+
+**Pending verification:** Vapi `assistantOverrides` query-string format used in `/call/inbound` is the documented pattern but unverified live — if Vapi rejects it, switch to per-call REST API.
 
 ---
 

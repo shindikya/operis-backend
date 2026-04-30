@@ -2,6 +2,8 @@ const supabase = require('../config/supabase');
 const { OperisError, handleError } = require('../utils/errorHandler');
 const { requireFields, validatePhone, validateFuture } = require('../utils/validation');
 const { sendSms } = require('../services/smsService');
+const { lookupHoliday, bangkokDateStr } = require('../config/thaiHolidays');
+const { generateAndUpload: generatePromptpayQr } = require('../services/promptpayService');
 
 function formatBangkokTime(utcStr) {
   const d = new Date(new Date(utcStr).getTime() + 7 * 60 * 60 * 1000);
@@ -13,7 +15,7 @@ function formatBangkokTime(utcStr) {
 // POST /booking
 async function createBooking(req, res) {
   try {
-    const { staff_id, client, service_id, source, notes } = req.body;
+    const { staff_id, client, service_id, source, notes, intake_answers } = req.body;
     const start_time = req.body.start_time || req.body.appointment_time;
 
     // SECURITY: business_id sourced from verified session, not client input.
@@ -30,6 +32,18 @@ async function createBooking(req, res) {
     requireFields(client || {}, ['name', 'phone']);
     validatePhone(client.phone);
     validateFuture(start_time, 'start_time');
+
+    // Block booking on Thai public holidays. Owners can override per-date later
+    // by inserting an availability_windows row with override_date set.
+    const holiday = lookupHoliday(bangkokDateStr(start_time));
+    if (holiday) {
+      throw new OperisError(
+        `Cannot book on ${holiday.date} — ${holiday.name_en} (${holiday.name_th}). The shop is closed for this public holiday.`,
+        'HOLIDAY_CLOSED',
+        409,
+        { date: holiday.date, holiday: holiday.name_en }
+      );
+    }
 
     // Resolve staff_id: use provided value, or fall back to first active staff for this business
     let resolvedStaffId = staff_id || null;
@@ -68,10 +82,11 @@ async function createBooking(req, res) {
       clientRecord = newClient;
     }
 
-    // Always fetch business — needed for duration fallback + owner SMS
+    // Always fetch business — needed for duration fallback, owner SMS,
+    // deposit threshold check, and PromptPay QR generation.
     const { data: business, error: businessError } = await supabase
       .from('businesses')
-      .select('name, phone, slot_duration_min')
+      .select('name, phone, slot_duration_min, promptpay_id, deposit_threshold_thb')
       .eq('id', business_id)
       .single();
 
@@ -79,13 +94,14 @@ async function createBooking(req, res) {
       throw new OperisError('Business not found', 'BUSINESS_NOT_FOUND', 404);
     }
 
-    let durationMin = business.slot_duration_min || 60;
-    let serviceName = null;
+    let durationMin  = business.slot_duration_min || 60;
+    let serviceName  = null;
+    let servicePrice = 0; // THB
 
     if (service_id) {
       const { data: service, error: serviceError } = await supabase
         .from('services')
-        .select('name, duration_min, is_active')
+        .select('name, duration_min, is_active, price_cents, currency')
         .eq('id', service_id)
         .single();
 
@@ -95,22 +111,45 @@ async function createBooking(req, res) {
       if (!service.is_active) {
         throw new OperisError('Service is not active', 'SERVICE_INACTIVE', 400);
       }
-      durationMin = service.duration_min;
-      serviceName = service.name;
+      durationMin  = service.duration_min;
+      serviceName  = service.name;
+      servicePrice = (service.currency || 'thb').toLowerCase() === 'thb'
+        ? (service.price_cents || 0) / 100
+        : 0;
     }
+
+    // Deposit-pending detection.
+    // Triggers when ALL three conditions hold:
+    //   - business has a promptpay_id configured (else there's no QR target)
+    //   - the caller is first-time (existingClient was null before insert)
+    //   - the booking value meets/exceeds the owner's deposit threshold
+    // When triggered, initial status becomes 'deposit_pending' and a QR is
+    // sent in the confirmation SMS. Owner manually marks paid in dashboard.
+    const isFirstTimeCaller = !existingClient;
+    const depositThreshold  = business.deposit_threshold_thb ?? 1500;
+    const needsDeposit      = !!business.promptpay_id
+                           && isFirstTimeCaller
+                           && servicePrice >= depositThreshold;
 
     const end_time = new Date(
       new Date(start_time).getTime() + durationMin * 60 * 1000
     ).toISOString();
 
-    // Two-phase booking: Vapi-tool calls insert as 'pending' with a 10-minute
-    // expiry so a mid-call hangup never leaves a confirmed booking. The AI
-    // explicitly confirms via PATCH /booking/:id/confirm. UI flows (and any
-    // caller passing { confirmed: true } with valid auth) skip the pending
-    // state and insert directly as 'confirmed'.
+    // Two-phase booking: Vapi-tool calls ALWAYS insert as 'pending' with a
+    // 10-minute expiry so a mid-call hangup never leaves a confirmed booking.
+    // The AI must explicitly confirm via PATCH /booking/:id/confirm.
+    //
+    // SECURITY (round 3 C2): the prior implementation honoured
+    // `confirmed: true` on the Vapi-tool path, which let any caller who knows
+    // the shared secret — or any prompt-injected AI — skip the pending state
+    // and create a confirmed booking in a single call. That defeats audit C5.
+    // We now ignore `confirmed:true` from the Vapi-tool path entirely.
+    // JWT (owner) flows still create confirmed bookings directly.
     const isVapiToolCall      = req.auth_source === 'vapi_tool';
-    const wantConfirmed       = req.body.confirmed === true;
-    const initialStatus       = (isVapiToolCall && !wantConfirmed) ? 'pending' : 'confirmed';
+    let initialStatus         = isVapiToolCall ? 'pending' : 'confirmed';
+    // Deposit gate overrides 'confirmed' (but pending stays pending — deposit
+    // flow only activates once the AI explicitly confirms the slot).
+    if (initialStatus === 'confirmed' && needsDeposit) initialStatus = 'deposit_pending';
     const expiresAt           = initialStatus === 'pending'
       ? new Date(Date.now() + 10 * 60 * 1000).toISOString()
       : null;
@@ -121,15 +160,16 @@ async function createBooking(req, res) {
       .from('bookings')
       .insert({
         business_id,
-        staff_id:    resolvedStaffId,
-        client_id:   clientRecord.id,
-        service_id:  service_id || null,
+        staff_id:        resolvedStaffId,
+        client_id:       clientRecord.id,
+        service_id:      service_id || null,
         start_time,
         end_time,
-        status:      initialStatus,
-        source:      resolvedSource,
-        notes:       notes || null,
-        expires_at:  expiresAt
+        status:          initialStatus,
+        source:          resolvedSource,
+        notes:           notes || null,
+        intake_answers:  Array.isArray(intake_answers) ? intake_answers : [],
+        expires_at:      expiresAt
       })
       .select()
       .single();
@@ -149,6 +189,33 @@ async function createBooking(req, res) {
     // PATCH /booking/:id/confirm.
     if (booking.status === 'confirmed') {
       await fireConfirmedSideEffects({ booking, business, client, serviceName, start_time, business_id, clientRecordId: clientRecord.id });
+    }
+
+    // Deposit-pending side-effects: generate PromptPay QR, upload, SMS the link
+    // to the caller. Owner notifies separately so they know to expect payment.
+    // All wrapped in soft-failure — booking creation itself already succeeded.
+    if (booking.status === 'deposit_pending') {
+      try {
+        const qrUrl = await generatePromptpayQr({
+          promptpayId: business.promptpay_id,
+          amountThb:   servicePrice,
+          bookingId:   booking.id
+        });
+
+        const { date, time } = formatBangkokTime(start_time);
+        const svcLabel = serviceName || 'บริการ';
+        const customerMsg = `จองนัดของคุณกับ ${business.name}: ${svcLabel} ${date} ${time}\nกรุณาชำระมัดจำ ${servicePrice} บาทผ่าน QR: ${qrUrl}\nนัดจะยืนยันเมื่อชำระแล้ว`;
+        sendSms(client.phone, customerMsg)
+          .catch(err => console.error('Deposit SMS to client failed:', err.message));
+
+        if (business.phone) {
+          const ownerMsg = `จองรอมัดจำ: ${client.name} (${client.phone}) ${svcLabel} ${date} ${time} — รอชำระ ${servicePrice} บาท`;
+          sendSms(business.phone, ownerMsg)
+            .catch(err => console.error('Owner deposit-pending SMS failed:', err.message));
+        }
+      } catch (err) {
+        console.error('PromptPay QR generation failed:', err.message);
+      }
     }
 
     return res.status(201).json({ booking });
@@ -234,9 +301,23 @@ async function confirmBooking(req, res) {
       throw new OperisError('Booking not found', 'BOOKING_NOT_FOUND', 404);
     }
 
-    // Cross-tenant guard: JWT users may only confirm their own bookings.
+    // Cross-tenant guard.
+    // JWT path: only the owning business may confirm.
+    // Vapi tool path (round 3 C3): require body.business_id and reject if it
+    //   does not match the booking's business_id. The shared Vapi secret is
+    //   global, so without this check anyone holding it could confirm any
+    //   pending booking by guessing IDs.
     if (req.auth_source === 'supabase' && existing.business_id !== req.business_id) {
       throw new OperisError('Booking not found', 'BOOKING_NOT_FOUND', 404);
+    }
+    if (req.auth_source === 'vapi_tool') {
+      const claimedBusinessId = req.body?.business_id;
+      if (!claimedBusinessId) {
+        throw new OperisError('Missing required field: business_id', 'MISSING_FIELDS', 400, { missing: ['business_id'] });
+      }
+      if (claimedBusinessId !== existing.business_id) {
+        throw new OperisError('Booking not found', 'BOOKING_NOT_FOUND', 404);
+      }
     }
 
     if (existing.status === 'confirmed') {
@@ -351,17 +432,25 @@ async function listBookings(req, res) {
 }
 
 // PATCH /booking/:id/cancel
+// Cancellation window: if the request is from the AI/Vapi flow (not authenticated
+// owner) and the booking is within `businesses.cancellation_window_hours` of
+// start_time, refuse the cancel and flag the booking for owner review instead.
+// Owners (auth_source === 'supabase') can always force-cancel.
 async function cancelBooking(req, res) {
   try {
     const { id } = req.params;
+    const isOwner = req.auth_source === 'supabase';
 
-    // SECURITY: business_id sourced from verified session, not client input.
-    const { data: existing, error: fetchError } = await supabase
+    // SECURITY: business_id sourced from verified session for owner flow.
+    // For non-owner flows the booking lookup omits the business_id filter
+    // and the caller must have already passed shared-secret middleware.
+    let query = supabase
       .from('bookings')
-      .select('id, status, business_id')
-      .eq('id', id)
-      .eq('business_id', req.business_id)
-      .single();
+      .select('id, status, business_id, start_time, businesses(cancellation_window_hours)')
+      .eq('id', id);
+    if (isOwner) query = query.eq('business_id', req.business_id);
+
+    const { data: existing, error: fetchError } = await query.single();
 
     if (fetchError || !existing) {
       throw new OperisError('Booking not found', 'BOOKING_NOT_FOUND', 404);
@@ -371,11 +460,39 @@ async function cancelBooking(req, res) {
       throw new OperisError('Booking is already cancelled', 'ALREADY_CANCELLED', 400);
     }
 
+    // Enforce cancellation window for non-owner cancels (i.e. AI on a call).
+    // Owner can override.
+    if (!isOwner) {
+      const windowHrs = existing.businesses?.cancellation_window_hours ?? 24;
+      const startMs   = new Date(existing.start_time).getTime();
+      const cutoffMs  = startMs - (windowHrs * 60 * 60 * 1000);
+      const nowMs     = Date.now();
+
+      if (nowMs > cutoffMs) {
+        // Too late — flag for owner instead of cancelling.
+        await supabase
+          .from('bookings')
+          .update({
+            flagged_for_owner: true,
+            flag_reason:       `Cancel requested within ${windowHrs}h window`
+          })
+          .eq('id', id);
+
+        throw new OperisError(
+          `Cancellation window has passed (${windowHrs}h). Booking flagged for owner review.`,
+          'CANCEL_WINDOW_EXPIRED',
+          409,
+          { window_hours: windowHrs }
+        );
+      }
+    }
+
+    const businessIdForUpdate = existing.business_id;
     const { data: booking, error: cancelError } = await supabase
       .from('bookings')
       .update({ status: 'cancelled' })
       .eq('id', id)
-      .eq('business_id', req.business_id)
+      .eq('business_id', businessIdForUpdate)
       .select()
       .single();
 
@@ -395,4 +512,70 @@ async function cancelBooking(req, res) {
   }
 }
 
-module.exports = { createBooking, confirmBooking, getBooking, listBookings, cancelBooking };
+// PATCH /booking/:id/deposit-paid
+// Owner-only. Flips a deposit_pending booking to confirmed and fires the
+// regular confirmed-booking side effects (owner SMS, reminders).
+async function markDepositPaid(req, res) {
+  try {
+    const { id } = req.params;
+    if (req.auth_source !== 'supabase') {
+      throw new OperisError('Owner authentication required', 'UNAUTHORIZED', 401);
+    }
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('bookings')
+      .select(`
+        id, status, business_id, start_time, client_id,
+        client:clients(id, name, phone),
+        service:services(name)
+      `)
+      .eq('id', id)
+      .eq('business_id', req.business_id)
+      .single();
+
+    if (fetchError || !existing) {
+      throw new OperisError('Booking not found', 'BOOKING_NOT_FOUND', 404);
+    }
+
+    if (existing.status !== 'deposit_pending') {
+      throw new OperisError(`Cannot mark paid: booking is ${existing.status}`, 'INVALID_STATUS', 400);
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from('bookings')
+      .update({
+        status:          'confirmed',
+        deposit_paid_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .eq('status', 'deposit_pending') // race-safe
+      .select()
+      .single();
+
+    if (updateErr || !updated) {
+      throw new OperisError('Booking already confirmed or changed', 'STATUS_RACE', 409);
+    }
+
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('phone, slot_duration_min')
+      .eq('id', existing.business_id)
+      .single();
+
+    await fireConfirmedSideEffects({
+      booking:        updated,
+      business,
+      client:         existing.client || { name: '', phone: '' },
+      serviceName:    existing.service?.name || null,
+      start_time:     updated.start_time,
+      business_id:    existing.business_id,
+      clientRecordId: existing.client_id
+    });
+
+    return res.json({ booking: updated });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+module.exports = { createBooking, confirmBooking, getBooking, listBookings, cancelBooking, markDepositPaid };

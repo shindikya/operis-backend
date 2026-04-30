@@ -113,10 +113,18 @@ async function handleInbound(req, res) {
       console.error('Failed to create call_session:', sessionError.message);
     }
 
-    // 7. Return TwiML connecting the call to Vapi using vapi_agent_id
+    // 7. Return TwiML connecting the call to Vapi using vapi_agent_id.
+    // assistantOverrides.variableValues are passed via the URL so Vapi can
+    // resolve {{client_notes}}, {{client_name}}, etc. in the system prompt.
+    // Vapi's Twilio integration accepts a base64-encoded JSON `overrides` query
+    // arg; if your Vapi version expects something different, update accordingly.
     const vapiAgentId = phoneRecord.vapi_agent_id;
+    const overrides = {
+      variableValues: context
+    };
+    const overridesB64 = Buffer.from(JSON.stringify(overrides)).toString('base64');
     return res.send(
-      `<Response><Redirect method="POST">https://api.vapi.ai/twilio?assistantId=${vapiAgentId}</Redirect></Response>`
+      `<Response><Redirect method="POST">https://api.vapi.ai/twilio?assistantId=${vapiAgentId}&assistantOverrides=${overridesB64}</Redirect></Response>`
     );
 
   } catch (err) {
