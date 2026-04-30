@@ -240,9 +240,24 @@ const CSV_HEADERS = [
   'end_reason'
 ];
 
+// CSV escape with formula-injection mitigation (round 3 C4).
+//
+// Every caller_number is E.164 — i.e. it always starts with '+'. Without the
+// leading-quote guard below, opening the export in Excel / Google Sheets /
+// Numbers evaluates every phone cell as a formula. An attacker who can
+// influence any other field (end_reason via a forged Vapi callback, transcript
+// fragments stored in call_sessions, etc.) can ship `=cmd|...` style payloads
+// directly into the founder's spreadsheet.
+//
+// Defence: prefix any cell beginning with =, +, -, @, tab, or CR with a single
+// quote, which forces spreadsheets to treat the cell as text. Then apply the
+// usual quote-and-escape for cells containing commas, quotes, or newlines.
 function csvEscape(value) {
   if (value === null || value === undefined) return '';
-  const s = String(value);
+  let s = String(value);
+  if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

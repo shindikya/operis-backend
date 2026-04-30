@@ -10,7 +10,8 @@
       "Bash(node -c backend/services/webhookRetryService.js)",
       "Bash(node -c backend/services/bookingExpiryService.js)",
       "Bash(node -c backend/controllers/callController.js)",
-      "Bash(node -c backend/controllers/bookingController.js)"
+      "Bash(node -c backend/controllers/bookingController.js)",
+      "Bash(git -C /Users/18606/Downloads/operis-backend/operis-backend show --stat 53d54ef)"
     ]
   }
 }
