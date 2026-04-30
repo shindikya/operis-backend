@@ -9,11 +9,17 @@ const callRoutes = require('./backend/routes/call');
 const onboardingRoutes = require('./backend/routes/onboarding');
 const provisionRoutes = require('./backend/routes/provision');
 const demoRoutes = require('./backend/routes/demo');
+const dashboardRoutes = require('./backend/routes/dashboard');
+const callsApiRoutes = require('./backend/routes/calls');
 const { startReminderCron } = require('./backend/services/reminderService');
+const { startWebhookRetryCron } = require('./backend/services/webhookRetryService');
+const { startBookingExpiryCron } = require('./backend/services/bookingExpiryService');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Body limit guards against oversized-payload memory DoS. Vapi end-of-call
+// reports including transcripts are typically <10KB; 64KB is a safe ceiling.
+app.use(express.json({ limit: '64kb' }));
 
 // Root
 app.get('/', (req, res) => {
@@ -42,10 +48,14 @@ app.use('/call', callRoutes);
 app.use('/onboarding', onboardingRoutes);
 app.use('/provision', provisionRoutes);
 app.use('/demo', demoRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/calls', callsApiRoutes);
 
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   startReminderCron();
+  startWebhookRetryCron();
+  startBookingExpiryCron();
 });

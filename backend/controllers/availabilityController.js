@@ -5,9 +5,16 @@ const { requireFields } = require('../utils/validation');
 // GET /availability?business_id=&staff_id=&date=YYYY-MM-DD
 async function getAvailability(req, res) {
   try {
-    const { business_id, staff_id, date } = req.query;
+    const { staff_id, date } = req.query;
 
-    requireFields(req.query, ['business_id', 'staff_id', 'date']);
+    // SECURITY: business_id sourced from verified session, not client input.
+    // If query.business_id is present and disagrees, reject — caller is poking.
+    if (req.query.business_id && req.query.business_id !== req.business_id) {
+      throw new OperisError('Business not found', 'BUSINESS_NOT_FOUND', 404);
+    }
+    const business_id = req.business_id;
+
+    requireFields({ staff_id, date }, ['staff_id', 'date']);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new OperisError('date must be in YYYY-MM-DD format', 'INVALID_DATE', 400);

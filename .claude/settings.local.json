@@ -5,7 +5,12 @@
       "Bash(node --check backend/controllers/callController.js)",
       "Bash(node --check backend/routes/call.js)",
       "Bash(node --check server.js)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(node -c backend/middleware/auth.js)",
+      "Bash(node -c backend/services/webhookRetryService.js)",
+      "Bash(node -c backend/services/bookingExpiryService.js)",
+      "Bash(node -c backend/controllers/callController.js)",
+      "Bash(node -c backend/controllers/bookingController.js)"
     ]
   }
 }

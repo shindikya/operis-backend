@@ -794,8 +794,14 @@
       showLoading();
 
       try {
-        // Collect open days
+        // Collect open days. We write to TWO stores:
+        //   1. availability_windows — per-staff slot generation source of truth
+        //   2. businesses.operating_hours JSONB — read by attributionService
+        //      (after-hours detection). Shape: { mon: {open:"09:00",close:"20:00"}, ... }.
+        //      Missing days = closed all day.
         const windows = [];
+        const operatingHours = {};
+        const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
         let hasOpenDay = false;
 
         DAYS.forEach(d => {
@@ -817,6 +823,8 @@
             end_time:     end,
             is_blocked:   false
           });
+
+          operatingHours[dayKeys[d.key]] = { open: start, close: end };
         });
 
         if (!hasOpenDay) {
@@ -860,6 +868,15 @@
           .insert(windows);
 
         if (winErr) throw winErr;
+
+        // Mirror to businesses.operating_hours JSONB so attribution can detect
+        // after-hours calls. This is the canonical shape attributionService reads.
+        const { error: hoursErr } = await supabase
+          .from('businesses')
+          .update({ operating_hours: operatingHours })
+          .eq('id', business.id);
+
+        if (hoursErr) throw hoursErr;
 
         // Upsert onboarding_state (handles missing row)
         await supabase

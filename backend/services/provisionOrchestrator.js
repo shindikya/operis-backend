@@ -25,8 +25,9 @@ async function vapiRequest(method, path, body) {
 }
 
 // Build the full Vapi assistant config for a given language
-function getVapiConfig(business, language) {
+function getVapiConfig(business, language, context = {}) {
   const persona = business.persona_config ?? {};
+  const { services = [], hours = [] } = context;
 
   const isThai = language === 'th';
 
@@ -51,7 +52,7 @@ function getVapiConfig(business, language) {
     model:       'gpt-4o-mini',
     temperature: 0.7,
     maxTokens:   250,
-    messages:    [{ role: 'system', content: buildSystemPrompt(business, language) }],
+    messages:    [{ role: 'system', content: buildSystemPrompt(business, language, { services, hours }) }],
     tools: [
       {
         type: 'function',
@@ -117,64 +118,162 @@ function getVapiConfig(business, language) {
   return config;
 }
 
-// Build system prompt in the appropriate language
-function buildSystemPrompt(business, language) {
+// Format a services list for inclusion in the prompt.
+function formatServices(services, language) {
+  if (!services || services.length === 0) return null;
+  const isThai = language === 'th';
+  return services.map(s => {
+    const parts = [s.name];
+    if (s.duration_min) parts.push(isThai ? `${s.duration_min} นาที` : `${s.duration_min} min`);
+    if (s.price_cents) {
+      const amount = (s.price_cents / 100).toFixed(0);
+      const currency = (s.currency ?? '').toUpperCase() || (isThai ? 'THB' : '');
+      parts.push(`${amount} ${currency}`.trim());
+    }
+    return `- ${parts.join(' — ')}`;
+  }).join('\n');
+}
+
+// Format opening hours for the prompt. `hours` rows: { day_of_week, start_time, end_time }.
+function formatHours(hours, language) {
+  if (!hours || hours.length === 0) return null;
+  const days = language === 'th'
+    ? ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์']
+    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const byDay = new Map();
+  for (const h of hours) {
+    if (!byDay.has(h.day_of_week)) byDay.set(h.day_of_week, []);
+    byDay.get(h.day_of_week).push(`${String(h.start_time).slice(0, 5)}–${String(h.end_time).slice(0, 5)}`);
+  }
+  const lines = [];
+  for (let d = 0; d < 7; d++) {
+    if (byDay.has(d)) lines.push(`- ${days[d]}: ${byDay.get(d).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+// Build system prompt in the appropriate language. `context` carries services + hours.
+function buildSystemPrompt(business, language, context = {}) {
   const persona = business.persona_config ?? {};
+  const { services = [], hours = [] } = context;
+  const timezone = business.timezone ?? (language === 'th' ? 'Asia/Bangkok' : 'UTC');
+  const servicesBlock = formatServices(services, language);
+  const hoursBlock = formatHours(hours, language);
 
   if (language === 'th') {
     const aiName = persona.ai_name ?? 'ผู้ช่วย';
-    const lines = [
+    const sections = [
+      '# ตัวตน',
       `คุณคือ ${aiName} ผู้ช่วยต้อนรับเสมือนของ ${business.name}`,
-      `เจ้าของคือ ${business.owner_name ?? business.name}`,
-      `ประกอบอาชีพ ${business.profession ?? 'ให้บริการ'}`,
-      `เขตเวลา: ${business.timezone ?? 'Asia/Bangkok'}`,
+      business.profession ? `ประเภทกิจการ: ${business.profession}` : null,
+      `เขตเวลา: ${timezone}`,
       '',
-      'หน้าที่ของคุณ:',
-      '- รับนัดหมายและจองคิว',
-      '- เลื่อนนัดหมาย',
-      '- ยกเลิกนัดหมาย',
-      '- ตอบคำถามเกี่ยวกับบริการและเวลาที่ว่าง',
-      '- ถ้าช่วยไม่ได้ขอชื่อและเบอร์โทรเพื่อให้เจ้าของติดต่อกลับ',
-      '',
-      'กฎสำคัญ:',
-      '- พูดสั้นและกระชับ ไม่เกิน 2 ประโยคต่อครั้ง',
-      '- ใช้คำสุภาพเสมอ ลงท้ายด้วย ค่ะ หรือ ครับ',
-      '- ห้ามบอกว่าเป็น AI ถ้าไม่ถูกถาม',
-      `- ถ้าถูกถามให้บอกว่าเป็นผู้ช่วยเสมือนของ ${business.name}`,
-      '- จบการสนทนาอย่างสุภาพเสมอ',
-      '- อย่าแต่งข้อมูลที่ไม่มี'
+      '# หน้าที่',
+      '- รับจอง เลื่อน หรือยกเลิกนัดหมาย',
+      '- ตอบคำถามเรื่องบริการ ราคา และเวลาเปิด-ปิด',
+      '- ถ้าช่วยไม่ได้ ขอชื่อและเบอร์โทรเพื่อให้เจ้าของโทรกลับ',
+      ''
     ];
 
-    if (persona.instructions) {
-      lines.push('', persona.instructions);
+    if (servicesBlock) {
+      sections.push('# บริการที่เปิดรับ', servicesBlock, '');
+    } else {
+      sections.push('# บริการ', 'ยังไม่มีรายการบริการ — ถามลูกค้าว่าสนใจบริการอะไร และขอชื่อ/เบอร์เพื่อให้เจ้าของติดต่อกลับ', '');
     }
 
-    return lines.join('\n');
+    if (hoursBlock) {
+      sections.push('# เวลาทำการ', hoursBlock, '');
+    }
+
+    sections.push(
+      '# ขั้นตอนการจอง',
+      '1. ถามว่าต้องการบริการอะไร (ใช้ชื่อจากรายการด้านบนเท่านั้น)',
+      '2. ถามวันและเวลาที่ต้องการ ตรวจสอบว่าอยู่ในเวลาทำการ',
+      '3. ถ้ายังไม่รู้ชื่อลูกค้า ให้ถามชื่อ',
+      '4. ทวนรายละเอียดให้ลูกค้ายืนยัน: บริการ วันเวลา ชื่อ',
+      `5. เมื่อยืนยันแล้ว เรียก create_booking โดยแปลงเวลาท้องถิ่น (${timezone}) เป็น UTC ISO 8601 เช่น 2026-04-10T09:00:00Z`,
+      '6. แจ้งสรุปให้ลูกค้าทราบอีกครั้งหลังจองสำเร็จ',
+      '',
+      '# กฎการสนทนา',
+      '- พูดสั้น กระชับ ไม่เกิน 2 ประโยคต่อครั้ง',
+      '- สุภาพเสมอ ลงท้ายด้วย ค่ะ หรือ ครับ',
+      '- ห้ามแต่งข้อมูลที่ไม่มี (ราคา บริการ เวลาเปิดปิด) ถ้าไม่รู้ให้ขอให้เจ้าของติดต่อกลับ',
+      `- ห้ามบอกว่าเป็น AI ถ้าไม่ถูกถาม ถ้าถูกถามให้บอกว่าเป็นผู้ช่วยเสมือนของ ${business.name}`,
+      '- จบการสนทนาอย่างอบอุ่น',
+      '',
+      '# ตัวอย่างการจอง',
+      'ลูกค้า: อยากจองพรุ่งนี้บ่ายสอง',
+      'คุณ: ได้ค่ะ ต้องการบริการอะไรคะ?',
+      'ลูกค้า: [ชื่อบริการ]',
+      'คุณ: รับทราบค่ะ ขอชื่อที่จะจองหน่อยค่ะ',
+      'ลูกค้า: ต้น',
+      'คุณ: ยืนยันนะคะ คุณต้น [ชื่อบริการ] พรุ่งนี้ 14:00 ถูกต้องไหมคะ?',
+      'ลูกค้า: ถูกต้องครับ',
+      'คุณ: [เรียก create_booking] จองเรียบร้อยค่ะ แล้วเจอกันพรุ่งนี้ 14:00 นะคะ'
+    );
+
+    if (persona.instructions) {
+      sections.push('', '# คำสั่งเพิ่มเติมจากเจ้าของ', persona.instructions);
+    }
+
+    return sections.filter(l => l !== null).join('\n');
   }
 
   // English prompt
-  const lines = [
-    `You are a virtual assistant for ${business.name}.`
+  const sections = [
+    '# Identity',
+    `You are a virtual assistant for ${business.name}.`,
+    business.profession ? `Business type: ${business.profession}.` : null,
+    `Timezone: ${timezone}.`,
+    '',
+    '# Responsibilities',
+    '- Book, reschedule, or cancel appointments.',
+    '- Answer questions about services, pricing, and opening hours.',
+    '- If you cannot help, take the caller\'s name and number so the owner can call back.',
+    ''
   ];
 
-  if (business.profession) {
-    lines.push(`The business specialises in ${business.profession}.`);
-  }
-  if (business.timezone) {
-    lines.push(`All appointment times are in the ${business.timezone} timezone.`);
+  if (servicesBlock) {
+    sections.push('# Services offered', servicesBlock, '');
+  } else {
+    sections.push('# Services', 'No service list is configured yet — ask the caller what they need and take their name and number for a callback.', '');
   }
 
-  lines.push(
-    'Your role is to help callers book, reschedule, or cancel appointments, and answer questions about services and availability.',
-    'If you cannot help, take the caller\'s name and number so the owner can call back.',
-    'Rules: respond in under 2 sentences per turn. Never reveal you are an AI unless directly asked — if asked, say you are a virtual assistant for ' + business.name + '. Always end calls warmly. Never make up information.'
+  if (hoursBlock) {
+    sections.push('# Opening hours', hoursBlock, '');
+  }
+
+  sections.push(
+    '# Booking flow',
+    '1. Ask which service they want (only offer services from the list above).',
+    '2. Ask for the desired date and time; confirm it falls within opening hours.',
+    '3. If the caller\'s name is unknown, ask for it.',
+    '4. Read the details back for confirmation: service, date/time, name.',
+    `5. Once confirmed, call create_booking. Convert the local time (${timezone}) to UTC ISO 8601 (e.g. 2026-04-10T09:00:00Z).`,
+    '6. Confirm the booking to the caller after the tool call succeeds.',
+    '',
+    '# Conversation rules',
+    '- Keep replies under 2 sentences.',
+    '- Never invent prices, services, or hours that are not listed above — if unsure, offer a callback.',
+    `- Do not say you are an AI unless directly asked. If asked, say you are a virtual assistant for ${business.name}.`,
+    '- End calls warmly.',
+    '',
+    '# Booking example',
+    'Caller: I\'d like to book tomorrow at 2pm.',
+    'You: Of course — which service would you like?',
+    'Caller: [service name].',
+    'You: Got it. May I have your name for the booking?',
+    'Caller: Alex.',
+    'You: To confirm: Alex, [service name], tomorrow at 2pm — is that right?',
+    'Caller: Yes.',
+    'You: [call create_booking] You\'re booked for tomorrow at 2pm. See you then!'
   );
 
   if (persona.instructions) {
-    lines.push(persona.instructions);
+    sections.push('', '# Owner instructions', persona.instructions);
   }
 
-  return lines.join(' ');
+  return sections.filter(l => l !== null).join('\n');
 }
 
 async function provisionBusiness({ businessId, phoneNumber, language = 'th' }) {
@@ -189,8 +288,25 @@ async function provisionBusiness({ businessId, phoneNumber, language = 'th' }) {
     throw new OperisError('Business not found', 'BUSINESS_NOT_FOUND', 404);
   }
 
-  // 2. Create Vapi assistant with language-appropriate config
-  const vapiAssistant = await vapiRequest('POST', '/assistant', getVapiConfig(business, language));
+  // 2. Load services + opening hours so the bot prompt is grounded in real data
+  const [{ data: services }, { data: hours }] = await Promise.all([
+    supabase
+      .from('services')
+      .select('name, duration_min, price_cents, currency')
+      .eq('business_id', businessId)
+      .eq('is_active', true),
+    supabase
+      .from('availability_windows')
+      .select('day_of_week, start_time, end_time')
+      .eq('business_id', businessId)
+      .order('day_of_week')
+  ]);
+
+  // 3. Create Vapi assistant with language-appropriate config
+  const vapiAssistant = await vapiRequest('POST', '/assistant', getVapiConfig(business, language, {
+    services: services ?? [],
+    hours:    hours ?? []
+  }));
   const vapiAgentId = vapiAssistant.id;
 
   // 3. Write to Supabase — roll back Vapi agent if any step fails

@@ -398,6 +398,112 @@
       color: var(--cream-dim);
       padding: 0 16px 8px;
     }
+
+    /* ── Revenue Attribution card ── */
+    .attribution-wrap {
+      padding: 14px 12px 4px;
+    }
+
+    .attribution-card {
+      background: var(--green-card);
+      border: 1px solid rgba(212,168,67,0.18);
+      border-radius: var(--radius);
+      padding: 16px 16px 14px;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .attribution-card::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--gold);
+      border-radius: var(--radius) 0 0 var(--radius);
+    }
+
+    .attribution-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--gold-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .attribution-headline {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--cream);
+      line-height: 1.35;
+      margin-bottom: 14px;
+    }
+
+    .attribution-headline .accent {
+      color: var(--gold);
+    }
+
+    .attribution-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .attribution-stat {
+      background: var(--green-deep);
+      border: 1px solid rgba(212,168,67,0.15);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+
+    .attribution-stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--gold);
+      line-height: 1.15;
+      display: block;
+    }
+
+    .attribution-stat-label {
+      font-size: 11px;
+      color: var(--cream-dim);
+      display: block;
+      margin-top: 3px;
+      line-height: 1.3;
+    }
+
+    .attribution-chart-wrap {
+      background: var(--green-deep);
+      border: 1px solid rgba(212,168,67,0.15);
+      border-radius: 10px;
+      padding: 10px 8px 8px;
+      height: 160px;
+      position: relative;
+    }
+
+    .attribution-csv {
+      display: block;
+      text-align: right;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--gold-dim);
+      text-decoration: none;
+    }
+
+    .attribution-csv:active {
+      color: var(--gold);
+    }
+
+    .attribution-loading {
+      font-size: 13px;
+      color: var(--cream-dim);
+      text-align: center;
+      padding: 12px 0;
+    }
   </style>
 </head>
 <body>
@@ -430,6 +536,13 @@
     </div>
   </div>
 
+  <!-- Revenue Attribution -->
+  <div class="attribution-wrap">
+    <div class="attribution-card" id="attribution-card">
+      <div class="attribution-loading">กำลังโหลดข้อมูลรายได้… / Loading revenue data…</div>
+    </div>
+  </div>
+
   <!-- Content -->
   <div id="content">
     <div class="loading-state">
@@ -443,9 +556,14 @@
        For production, enable Row Level Security (RLS) on the bookings table
        so unauthenticated reads are scoped to the intended business only. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <!-- Chart.js for the revenue attribution bar chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
     const SUPABASE_URL  = 'https://grzghjoughjqyguabaxx.supabase.co';
     const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdyemdoam91Z2hqcXlndWFiYXh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5Njc5NzEsImV4cCI6MjA5MDU0Mzk3MX0.lIXBtNMhAQBVR-0uctE52ULzFcyegxPnKr3CAIpJLcU';
+    // Backend (Express/Railway) base URL. Empty string = same origin as this page.
+    // Override if dashboard is served from a different origin than the API.
+    const BACKEND_BASE_URL = '';
     const TZ_OFFSET_MS  = 7 * 60 * 60 * 1000; // UTC+7 Bangkok
 
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
@@ -649,7 +767,198 @@
 
     function attachRefresh() {
       const btn = document.getElementById('refresh-btn');
-      if (btn) btn.addEventListener('click', loadBookings);
+      if (btn) {
+        btn.addEventListener('click', () => {
+          loadBookings();
+          loadAttribution();
+        });
+      }
+    }
+
+    // ── Revenue Attribution ──────────────────────────────────────────────────
+
+    let attributionChart = null;
+
+    const TH_MONTHS_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
+                              'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const EN_MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun',
+                              'Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    function formatMonthLabel(monthIso) {
+      // monthIso is YYYY-MM-DD (first of month). Build "พ.ค. / May" style.
+      const [y, m] = monthIso.split('-').map(Number);
+      const idx = m - 1;
+      return `${TH_MONTHS_SHORT[idx]} / ${EN_MONTHS_SHORT[idx]}`;
+    }
+
+    function formatBaht(n) {
+      const v = Math.round(Number(n || 0));
+      return '฿' + v.toLocaleString('en-US');
+    }
+
+    function renderAttribution(data, token) {
+      const card = document.getElementById('attribution-card');
+      const current = data.current_month || {};
+      const last4   = data.last_4_months || [];
+
+      card.innerHTML = `
+        <div class="attribution-eyebrow">รายได้จาก Operis &nbsp;·&nbsp; Revenue captured</div>
+        <div class="attribution-headline">${escapeHtml(data.headline_message || '')}</div>
+        <div class="attribution-grid">
+          <div class="attribution-stat">
+            <span class="attribution-stat-value">${formatBaht(current.revenue_captured_thb)}</span>
+            <span class="attribution-stat-label">เดือนนี้ / captured this month</span>
+          </div>
+          <div class="attribution-stat">
+            <span class="attribution-stat-value">${current.calls_answered ?? 0}</span>
+            <span class="attribution-stat-label">รับสาย / calls answered</span>
+          </div>
+          <div class="attribution-stat">
+            <span class="attribution-stat-value">${current.after_hours_calls ?? 0}</span>
+            <span class="attribution-stat-label">นอกเวลาทำการ / after-hours handled</span>
+          </div>
+          <div class="attribution-stat">
+            <span class="attribution-stat-value">${current.missed_call_recoveries ?? 0}</span>
+            <span class="attribution-stat-label">ตามสายที่ไม่ได้รับ / missed calls recovered</span>
+          </div>
+        </div>
+        <div class="attribution-chart-wrap">
+          <canvas id="attribution-chart"></canvas>
+        </div>
+        <a class="attribution-csv" id="attribution-csv" href="#">
+          ดาวน์โหลดบันทึกการโทร (CSV) / Download call log (CSV) ↓
+        </a>
+      `;
+
+      const csvLink = document.getElementById('attribution-csv');
+      if (csvLink) {
+        csvLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          downloadAttributionCsv(token);
+        });
+      }
+
+      const labels = last4.map(m => formatMonthLabel(m.month));
+      const values = last4.map(m => Number(m.revenue_captured_thb || 0));
+
+      if (attributionChart) {
+        attributionChart.destroy();
+        attributionChart = null;
+      }
+
+      const ctx = document.getElementById('attribution-chart');
+      if (ctx && window.Chart) {
+        attributionChart = new window.Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              data: values,
+              backgroundColor: 'rgba(212,168,67,0.85)',
+              borderColor: 'rgba(232,197,71,1)',
+              borderWidth: 1,
+              borderRadius: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend:  { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => formatBaht(ctx.parsed.y)
+                }
+              }
+            },
+            scales: {
+              x: {
+                ticks: { color: '#B8B0A0', font: { size: 10 } },
+                grid:  { display: false }
+              },
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  color: '#B8B0A0',
+                  font: { size: 10 },
+                  callback: (v) => formatBaht(v)
+                },
+                grid: { color: 'rgba(212,168,67,0.08)' }
+              }
+            }
+          }
+        });
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderAttributionError() {
+      const card = document.getElementById('attribution-card');
+      card.innerHTML = `
+        <div class="attribution-eyebrow">รายได้จาก Operis &nbsp;·&nbsp; Revenue captured</div>
+        <div class="attribution-loading">โหลดข้อมูลรายได้ไม่ได้ / Could not load revenue data</div>
+      `;
+    }
+
+    async function loadAttribution() {
+      if (!businessId) return;
+      try {
+        // SECURITY: send the active Supabase JWT so the backend can verify the
+        // caller and scope the response to their business. Without this header
+        // the backend (post audit C1) returns 401.
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) {
+          window.location.href = 'login.html';
+          return;
+        }
+
+        const res = await fetch(`${BACKEND_BASE_URL}/api/dashboard/${businessId}/attribution`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // The CSV link needs the same token. We can't put it in a static href
+        // because <a download> doesn't send custom headers. Wire a click handler
+        // that fetches and triggers a Blob download.
+        renderAttribution(data, token);
+      } catch (err) {
+        console.error('loadAttribution failed:', err);
+        renderAttributionError();
+      }
+    }
+
+    async function downloadAttributionCsv(token) {
+      try {
+        const res = await fetch(`${BACKEND_BASE_URL}/api/dashboard/${businessId}/attribution/export`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const cd = res.headers.get('content-disposition') || '';
+        const m  = cd.match(/filename="?([^"]+)"?/);
+        const filename = m ? m[1] : 'operis_calls.csv';
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('CSV download failed:', err);
+      }
     }
 
     // ── Fetch ────────────────────────────────────────────────────────────────
@@ -732,6 +1041,7 @@
       businessId = business.id;
       document.getElementById('shop-name').textContent = business.name;
       loadBookings();
+      loadAttribution();
     }
 
     init();

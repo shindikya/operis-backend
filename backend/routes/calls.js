@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { getAvailability } = require('../controllers/availabilityController');
+const { postCallOutcome } = require('../controllers/attributionController');
 const { requireSupabaseAuth } = require('../middleware/auth');
 
-router.get('/', requireSupabaseAuth(), getAvailability);
+router.post('/:callId/outcome', requireSupabaseAuth(), postCallOutcome);
 
 module.exports = router;
